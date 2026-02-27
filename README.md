@@ -81,6 +81,31 @@ aw-watcher-git --testing --verbose
 curl http://localhost:5666/api/0/buckets/aw-watcher-git_$(hostname)/events?limit=5
 ```
 
+## Visualization
+
+aw-watcher-git includes a custom visualization dashboard that shows git activity broken down by repo, branch, and file. It runs inside the AW web UI as a custom visualization.
+
+### Setup
+
+1. Add the following to `~/.config/activitywatch/aw-server/aw-server.toml`:
+
+```toml
+[server.custom_static]
+aw-watcher-git = "/full/path/to/aw-watcher-git/visualization"
+```
+
+2. Restart aw-server (or restart aw-qt)
+
+3. In the AW web UI, go to **Activity** → **Edit View** → **Add Visualization** → **Custom Visualization** and enter `aw-watcher-git`
+
+### Features
+
+- **Summary** — stats cards, repo bar chart, top branches doughnut, hourly activity chart
+- **Repos** — time per repo with click-to-drilldown into branch breakdown
+- **Branches** — time per branch with repo filter
+- **Timeline** — gantt-style view of branch activity over time with tooltips
+- **Files** — ranked table of most-edited files with duration bars
+
 ## License
 
 MPL-2.0

@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>aw-watcher-git</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/moment@2.30.1/moment.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.1/dist/chartjs-adapter-moment.min.js"></script>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --bg-card: #16213e;
+      --bg-card-hover: #1a2744;
+      --bg-tab: #0f3460;
+      --bg-tab-active: #e94560;
+      --text: #eee;
+      --text-muted: #8892a4;
+      --text-dim: #5a6478;
+      --border: #233554;
+      --accent: #e94560;
+      --accent-soft: rgba(233, 69, 96, 0.15);
+      --scrollbar-track: #16213e;
+      --scrollbar-thumb: #233554;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 16px;
+    }
+
+    /* header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .header h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .header h1 span { color: var(--accent); }
+    .header-meta {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+      overflow-x: auto;
+    }
+    .tab {
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    /* tab panels */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* stat cards row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .stat-card .label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .stat-card .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .stat-card .sub {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    /* chart containers */
+    .chart-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .chart-card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .chart-wrap {
+      position: relative;
+      width: 100%;
+    }
+
+    /* clickable bar hint */
+    .click-hint {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    /* table */
+    .file-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .file-table th {
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .file-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .file-table tr:hover td { background: var(--bg-card-hover); }
+    .file-table .path {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.8rem;
+      word-break: break-all;
+    }
+    .file-table .repo-tag {
+      display: inline-block;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.7rem;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 500;
+      margin-right: 6px;
+    }
+    .file-table .duration-bar-cell { width: 30%; }
+    .duration-bar-bg {
+      background: var(--border);
+      border-radius: 3px;
+      height: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .duration-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--accent);
+    }
+
+    /* timeline blocks */
+    .timeline-container {
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+    .timeline-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .timeline-label {
+      width: 200px;
+      min-width: 200px;
+      font-size: 0.8rem;
+      padding-right: 12px;
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-muted);
+    }
+    .timeline-track {
+      flex: 1;
+      height: 20px;
+      position: relative;
+      background: rgba(255,255,255,0.02);
+      border-radius: 3px;
+    }
+    .timeline-block {
+      position: absolute;
+      height: 100%;
+      border-radius: 3px;
+      min-width: 2px;
+      opacity: 0.85;
+      cursor: default;
+    }
+    .timeline-block:hover { opacity: 1; }
+    .timeline-axis {
+      display: flex;
+      margin-top: 4px;
+    }
+    .timeline-axis-label {
+      min-width: 200px;
+    }
+    .timeline-axis-ticks {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+
+    /* repo filter dropdown */
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .filter-row label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .filter-row select {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .filter-row select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* breadcrumb for drilldown */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 12px;
+      font-size: 0.8rem;
+    }
+    .breadcrumb a {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .breadcrumb a:hover { text-decoration: underline; }
+    .breadcrumb .sep { color: var(--text-dim); }
+    .breadcrumb .current { color: var(--text-muted); }
+
+    /* loading / error */
+    .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+    .spinner {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--accent);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    /* tooltip for timeline */
+    .tooltip {
+      position: fixed;
+      background: #111;
+      color: #eee;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      pointer-events: none;
+      z-index: 100;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      display: none;
+    }
+
+    /* legend for timeline */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1><span>git</span> activity</h1>
+      <div class="header-meta" id="headerMeta"></div>
+    </div>
+
+    <div class="tabs" id="tabsBar">
+      <button class="tab active" data-tab="summary">Summary</button>
+      <button class="tab" data-tab="repos">Repos</button>
+      <button class="tab" data-tab="branches">Branches</button>
+      <button class="tab" data-tab="timeline">Timeline</button>
+      <button class="tab" data-tab="files">Files</button>
+    </div>
+
+    <div id="loadingIndicator" class="loading">
+      <div class="spinner"></div>
+      <div>Loading git activity data...</div>
+    </div>
+
+    <div id="errorIndicator" class="error-msg" style="display:none;"></div>
+
+    <!-- summary panel -->
+    <div class="panel active" id="panel-summary" style="display:none;">
+      <div class="stats-row" id="statsRow"></div>
+      <div class="chart-card">
+        <h2>Time by repository</h2>
+        <div class="chart-wrap"><canvas id="summaryRepoChart"></canvas></div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div class="chart-card">
+          <h2>Top branches</h2>
+          <div class="chart-wrap"><canvas id="summaryBranchChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h2>Activity over time</h2>
+          <div class="chart-wrap"><canvas id="summaryTimeChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- repos panel -->
+    <div class="panel" id="panel-repos" style="display:none;">
+      <div id="reposBreadcrumb" class="breadcrumb"></div>
+      <div class="chart-card">
+        <h2 id="reposChartTitle">Time per repository</h2>
+        <div class="chart-wrap"><canvas id="reposBarChart"></canvas></div>
+        <div class="click-hint" id="reposClickHint">click a bar to see branch breakdown</div>
+      </div>
+    </div>
+
+    <!-- branches panel -->
+    <div class="panel" id="panel-branches" style="display:none;">
+      <div class="filter-row">
+        <label for="branchRepoFilter">Repository:</label>
+        <select id="branchRepoFilter"><option value="__all__">All repos</option></select>
+      </div>
+      <div class="chart-card">
+        <h2>Time per branch</h2>
+        <div class="chart-wrap"><canvas id="branchesChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- timeline panel -->
+    <div class="panel" id="panel-timeline" style="display:none;">
+      <div class="filter-row">
+        <label for="timelineRepoFilter">Repository:</label>
+        <select id="timelineRepoFilter"><option value="__all__">All repos</option></select>
+      </div>
+      <div class="chart-card">
+        <h2>Branch activity timeline</h2>
+        <div class="legend" id="timelineLegend"></div>
+        <div class="timeline-container" id="timelineContainer"></div>
+      </div>
+    </div>
+
+    <!-- files panel -->
+    <div class="panel" id="panel-files" style="display:none;">
+      <div class="filter-row">
+        <label for="fileRepoFilter">Repository:</label>
+        <select id="fileRepoFilter"><option value="__all__">All repos</option></select>
+      </div>
+      <div class="chart-card">
+        <h2>Most active files</h2>
+        <table class="file-table" id="fileTable">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Branch</th>
+              <th>Time</th>
+              <th class="duration-bar-cell">Relative</th>
+            </tr>
+          </thead>
+          <tbody id="fileTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    /* ------------------------------------------------------------------ */
+    /*  colour palette                                                     */
+    /* ------------------------------------------------------------------ */
+    const COLORS = [
+      '#e94560', '#0ea5e9', '#22c55e', '#f59e0b', '#a855f7',
+      '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
+      '#ef4444', '#06b6d4', '#8b5cf6', '#eab308', '#10b981',
+      '#f43f5e', '#3b82f6', '#d946ef', '#facc15', '#2dd4bf',
+    ];
+    function color(i) { return COLORS[i % COLORS.length]; }
+
+    /* ------------------------------------------------------------------ */
+    /*  helpers                                                            */
+    /* ------------------------------------------------------------------ */
+    function params() {
+      const p = new URLSearchParams(window.location.search);
+      return {
+        hostname: p.get('hostname') || '',
+        start:    p.get('start')    || '',
+        end:      p.get('end')      || '',
+        title:    p.get('title')    || '',
+      };
+    }
+
+    function fmtDuration(seconds) {
+      if (seconds < 60)   return `${Math.round(seconds)}s`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+      const h = Math.floor(seconds / 3600);
+      const m = Math.round((seconds % 3600) / 60);
+      return `${h}h ${m}m`;
+    }
+
+    function fmtTime(dateStr) {
+      const d = new Date(dateStr);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function fmtDate(dateStr) {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  data fetching                                                      */
+    /* ------------------------------------------------------------------ */
+    async function fetchEvents() {
+      const { hostname, start, end } = params();
+      const bucketId = `aw-watcher-git_${hostname}`;
+      const origin = window.location.origin !== 'null'
+        ? window.location.origin
+        : `${window.location.protocol}//${window.location.host}`;
+
+      /* try parent origin first (iframe scenario) */
+      let baseUrl = '';
+      try {
+        if (window.parent !== window && window.parent.location.origin) {
+          baseUrl = window.parent.location.origin;
+        }
+      } catch (_) { /* cross-origin, fall through */ }
+      if (!baseUrl) baseUrl = origin;
+
+      const url = new URL(`/api/0/buckets/${encodeURIComponent(bucketId)}/events`, baseUrl);
+      if (start) url.searchParams.set('start', start);
+      if (end)   url.searchParams.set('end', end);
+      url.searchParams.set('limit', '-1');
+
+      const res = await fetch(url.toString());
+      if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+      return res.json();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  aggregation                                                        */
+    /* ------------------------------------------------------------------ */
+    function aggregate(events) {
+      const byRepo = {};
+      const byBranch = {};
+      const byFile = {};
+      const byRepoBranch = {};
+      let totalDuration = 0;
+      const repos = new Set();
+      const branches = new Set();
+      const files = new Set();
+
+      for (const ev of events) {
+        const d = ev.data || {};
+        const repo = d.repo || 'unknown';
+        const branch = d.branch || 'unknown';
+        const file = d.file || '';
+        const dur = ev.duration || 0;
+
+        totalDuration += dur;
+        repos.add(repo);
+        branches.add(`${repo}/${branch}`);
+        if (file) files.add(`${repo}:${file}`);
+
+        byRepo[repo] = (byRepo[repo] || 0) + dur;
+
+        const bKey = `${repo}/${branch}`;
+        byBranch[bKey] = byBranch[bKey] || { repo, branch, duration: 0 };
+        byBranch[bKey].duration += dur;
+
+        if (file) {
+          const fKey = `${repo}:${branch}:${file}`;
+          byFile[fKey] = byFile[fKey] || { repo, branch, file, duration: 0 };
+          byFile[fKey].duration += dur;
+        }
+
+        if (!byRepoBranch[repo]) byRepoBranch[repo] = {};
+        byRepoBranch[repo][branch] = (byRepoBranch[repo][branch] || 0) + dur;
+      }
+
+      return {
+        events,
+        byRepo,
+        byBranch: Object.values(byBranch),
+        byFile: Object.values(byFile),
+        byRepoBranch,
+        totalDuration,
+        repoCount: repos.size,
+        branchCount: branches.size,
+        fileCount: files.size,
+        repos: [...repos].sort(),
+      };
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  chart default config                                               */
+    /* ------------------------------------------------------------------ */
+    Chart.defaults.color = '#8892a4';
+    Chart.defaults.borderColor = '#233554';
+    Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+    const chartInstances = {};
+    function destroyChart(id) {
+      if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  tab handling                                                        */
+    /* ------------------------------------------------------------------ */
+    const tabBar = document.getElementById('tabsBar');
+    tabBar.addEventListener('click', (e) => {
+      if (!e.target.classList.contains('tab')) return;
+      tabBar.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      e.target.classList.add('active');
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      const panel = document.getElementById(`panel-${e.target.dataset.tab}`);
+      if (panel) panel.classList.add('active');
+    });
+
+    /* ------------------------------------------------------------------ */
+    /*  render: summary                                                    */
+    /* ------------------------------------------------------------------ */
+    function renderSummary(data) {
+      /* stats */
+      const topRepo = Object.entries(data.byRepo).sort((a,b) => b[1]-a[1])[0];
+      const topBranch = data.byBranch.sort((a,b) => b.duration-a.duration)[0];
+
+      const stats = [
+        { label: 'Active time', value: fmtDuration(data.totalDuration) },
+        { label: 'Repositories', value: data.repoCount },
+        { label: 'Branches', value: data.branchCount },
+        { label: 'Files changed', value: data.fileCount },
+        { label: 'Top repo', value: topRepo ? topRepo[0] : '-', sub: topRepo ? fmtDuration(topRepo[1]) : '' },
+        { label: 'Top branch', value: topBranch ? topBranch.branch : '-', sub: topBranch ? `${topBranch.repo} - ${fmtDuration(topBranch.duration)}` : '' },
+      ];
+
+      const row = document.getElementById('statsRow');
+      row.innerHTML = stats.map(s => `
+        <div class="stat-card">
+          <div class="label">${s.label}</div>
+          <div class="value">${s.value}</div>
+          ${s.sub ? `<div class="sub">${s.sub}</div>` : ''}
+        </div>
+      `).join('');
+
+      /* repo horizontal bar */
+      const repoEntries = Object.entries(data.byRepo).sort((a,b) => b[1]-a[1]);
+      destroyChart('summaryRepoChart');
+      chartInstances['summaryRepoChart'] = new Chart(
+        document.getElementById('summaryRepoChart'), {
+          type: 'bar',
+          data: {
+            labels: repoEntries.map(r => r[0]),
+            datasets: [{
+              data: repoEntries.map(r => r[1]),
+              backgroundColor: repoEntries.map((_, i) => color(i)),
+              borderRadius: 4,
+              maxBarThickness: 32,
+            }],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: { label: ctx => fmtDuration(ctx.parsed.x) },
+              },
+            },
+            scales: {
+              x: {
+                ticks: { callback: v => fmtDuration(v) },
+                grid: { color: 'rgba(255,255,255,0.04)' },
+              },
+              y: { grid: { display: false } },
+            },
+          },
+        }
+      );
+
+      /* top 8 branches doughnut */
+      const topBranches = data.byBranch.sort((a,b) => b.duration-a.duration).slice(0, 8);
+      destroyChart('summaryBranchChart');
+      chartInstances['summaryBranchChart'] = new Chart(
+        document.getElementById('summaryBranchChart'), {
+          type: 'doughnut',
+          data: {
+            labels: topBranches.map(b => `${b.repo}/${b.branch}`),
+            datasets: [{
+              data: topBranches.map(b => b.duration),
+              backgroundColor: topBranches.map((_, i) => color(i)),
+              borderWidth: 0,
+            }],
+          },
+          options: {
+            responsive: true,
+            cutout: '55%',
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: { boxWidth: 12, padding: 8, font: { size: 11 } },
+              },
+              tooltip: {
+                callbacks: { label: ctx => ` ${ctx.label}: ${fmtDuration(ctx.parsed)}` },
+              },
+            },
+          },
+        }
+      );
+
+      /* activity over time (hourly bins) */
+      const hourBins = {};
+      for (const ev of data.events) {
+        const t = new Date(ev.timestamp);
+        const key = new Date(t.getFullYear(), t.getMonth(), t.getDate(), t.getHours()).toISOString();
+        hourBins[key] = (hourBins[key] || 0) + (ev.duration || 0);
+      }
+      const timeSeries = Object.entries(hourBins)
+        .sort((a,b) => a[0].localeCompare(b[0]))
+        .map(([t, d]) => ({ x: t, y: d }));
+
+      destroyChart('summaryTimeChart');
+      chartInstances['summaryTimeChart'] = new Chart(
+        document.getElementById('summaryTimeChart'), {
+          type: 'bar',
+          data: {
+            datasets: [{
+              data: timeSeries,
+              backgroundColor: 'rgba(233, 69, 96, 0.6)',
+              borderRadius: 3,
+              maxBarThickness: 20,
+            }],
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: ctx => {
+                    const d = new Date(ctx[0].parsed.x);
+                    return `${fmtDate(d)} ${fmtTime(d)}`;
+                  },
+                  label: ctx => fmtDuration(ctx.parsed.y),
+                },
+              },
+            },
+            scales: {
+              x: {
+                type: 'time',
+                time: { unit: 'hour', displayFormats: { hour: 'HH:mm' } },
+                grid: { color: 'rgba(255,255,255,0.04)' },
+              },
+              y: {
+                ticks: { callback: v => fmtDuration(v) },
+                grid: { color: 'rgba(255,255,255,0.04)' },
+              },
+            },
+          },
+        }
+      );
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  render: repos (with drilldown)                                     */
+    /* ------------------------------------------------------------------ */
+    let reposDrillState = null; /* null = top-level, string = repo name */
+
+    function renderRepos(data) {
+      reposDrillState = null;
+      renderReposChart(data);
+    }
+
+    function renderReposChart(data) {
+      const bc = document.getElementById('reposBreadcrumb');
+      const title = document.getElementById('reposChartTitle');
+      const hint = document.getElementById('reposClickHint');
+      destroyChart('reposBarChart');
+
+      if (reposDrillState) {
+        /* drilldown: show branches for selected repo */
+        bc.innerHTML = `<a id="reposBcAll">All repos</a><span class="sep">/</span><span class="current">${reposDrillState}</span>`;
+        document.getElementById('reposBcAll').addEventListener('click', () => {
+          reposDrillState = null;
+          renderReposChart(data);
+        });
+        title.textContent = `Branches in ${reposDrillState}`;
+        hint.textContent = '';
+
+        const branches = data.byRepoBranch[reposDrillState] || {};
+        const entries = Object.entries(branches).sort((a,b) => b[1]-a[1]);
+        chartInstances['reposBarChart'] = new Chart(
+          document.getElementById('reposBarChart'), {
+            type: 'bar',
+            data: {
+              labels: entries.map(e => e[0]),
+              datasets: [{
+                data: entries.map(e => e[1]),
+                backgroundColor: entries.map((_, i) => color(i)),
+                borderRadius: 4,
+                maxBarThickness: 32,
+              }],
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => fmtDuration(ctx.parsed.x) } },
+              },
+              scales: {
+                x: {
+                  ticks: { callback: v => fmtDuration(v) },
+                  grid: { color: 'rgba(255,255,255,0.04)' },
+                },
+                y: { grid: { display: false } },
+              },
+            },
+          }
+        );
+      } else {
+        /* top level: repos */
+        bc.innerHTML = '';
+        title.textContent = 'Time per repository';
+        hint.textContent = 'click a bar to see branch breakdown';
+
+        const entries = Object.entries(data.byRepo).sort((a,b) => b[1]-a[1]);
+        chartInstances['reposBarChart'] = new Chart(
+          document.getElementById('reposBarChart'), {
+            type: 'bar',
+            data: {
+              labels: entries.map(e => e[0]),
+              datasets: [{
+                data: entries.map(e => e[1]),
+                backgroundColor: entries.map((_, i) => color(i)),
+                borderRadius: 4,
+                maxBarThickness: 32,
+              }],
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              onClick: (_evt, elements) => {
+                if (elements.length > 0) {
+                  reposDrillState = entries[elements[0].index][0];
+                  renderReposChart(data);
+                }
+              },
+              plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => fmtDuration(ctx.parsed.x) } },
+              },
+              scales: {
+                x: {
+                  ticks: { callback: v => fmtDuration(v) },
+                  grid: { color: 'rgba(255,255,255,0.04)' },
+                },
+                y: { grid: { display: false } },
+              },
+            },
+          }
+        );
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  render: branches                                                   */
+    /* ------------------------------------------------------------------ */
+    function renderBranches(data) {
+      populateRepoFilter('branchRepoFilter', data.repos, () => renderBranchesChart(data));
+      renderBranchesChart(data);
+    }
+
+    function renderBranchesChart(data) {
+      const filterVal = document.getElementById('branchRepoFilter').value;
+      let branches = data.byBranch;
+      if (filterVal !== '__all__') {
+        branches = branches.filter(b => b.repo === filterVal);
+      }
+      branches = branches.sort((a,b) => b.duration - a.duration).slice(0, 20);
+
+      /* group branches by repo for stacked look */
+      const repoSet = [...new Set(branches.map(b => b.repo))];
+      const repoColorMap = {};
+      repoSet.forEach((r, i) => repoColorMap[r] = color(i));
+
+      destroyChart('branchesChart');
+      chartInstances['branchesChart'] = new Chart(
+        document.getElementById('branchesChart'), {
+          type: 'bar',
+          data: {
+            labels: branches.map(b => b.branch),
+            datasets: [{
+              data: branches.map(b => b.duration),
+              backgroundColor: branches.map(b => repoColorMap[b.repo]),
+              borderRadius: 4,
+              maxBarThickness: 32,
+            }],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: ctx => `${branches[ctx[0].dataIndex].repo} / ${ctx[0].label}`,
+                  label: ctx => fmtDuration(ctx.parsed.x),
+                },
+              },
+            },
+            scales: {
+              x: {
+                ticks: { callback: v => fmtDuration(v) },
+                grid: { color: 'rgba(255,255,255,0.04)' },
+              },
+              y: { grid: { display: false } },
+            },
+          },
+        }
+      );
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  render: timeline                                                   */
+    /* ------------------------------------------------------------------ */
+    function renderTimeline(data) {
+      populateRepoFilter('timelineRepoFilter', data.repos, () => renderTimelineView(data));
+      renderTimelineView(data);
+    }
+
+    function renderTimelineView(data) {
+      const filterVal = document.getElementById('timelineRepoFilter').value;
+      let events = data.events;
+      if (filterVal !== '__all__') {
+        events = events.filter(e => (e.data || {}).repo === filterVal);
+      }
+      if (events.length === 0) {
+        document.getElementById('timelineContainer').innerHTML = '<div class="empty-state">No events for this filter.</div>';
+        document.getElementById('timelineLegend').innerHTML = '';
+        return;
+      }
+
+      /* find time range */
+      const times = events.map(e => new Date(e.timestamp).getTime());
+      const durEnds = events.map(e => new Date(e.timestamp).getTime() + (e.duration || 0) * 1000);
+      const minTime = Math.min(...times);
+      const maxTime = Math.max(...durEnds);
+      const range = maxTime - minTime || 1;
+
+      /* group by "repo/branch" */
+      const rowMap = {};
+      const repoSet = new Set();
+      for (const ev of events) {
+        const d = ev.data || {};
+        const repo = d.repo || 'unknown';
+        const branch = d.branch || 'unknown';
+        const key = `${repo}/${branch}`;
+        repoSet.add(repo);
+        if (!rowMap[key]) rowMap[key] = { repo, branch, events: [] };
+        rowMap[key].events.push(ev);
+      }
+
+      const repos = [...repoSet];
+      const repoColorMap = {};
+      repos.forEach((r, i) => repoColorMap[r] = color(i));
+
+      /* legend */
+      const legendEl = document.getElementById('timelineLegend');
+      legendEl.innerHTML = repos.map(r =>
+        `<div class="legend-item"><div class="legend-swatch" style="background:${repoColorMap[r]}"></div>${r}</div>`
+      ).join('');
+
+      /* sort rows: by first event time */
+      const rows = Object.values(rowMap).sort((a,b) => {
+        const ta = new Date(a.events[0].timestamp).getTime();
+        const tb = new Date(b.events[0].timestamp).getTime();
+        return ta - tb;
+      });
+
+      /* build timeline html */
+      const tooltip = document.getElementById('tooltip');
+      const container = document.getElementById('timelineContainer');
+
+      let html = '';
+      for (const row of rows) {
+        const label = `${row.repo}/${row.branch}`;
+        html += `<div class="timeline-row">`;
+        html += `<div class="timeline-label" title="${label}">${label}</div>`;
+        html += `<div class="timeline-track">`;
+        for (const ev of row.events) {
+          const start = new Date(ev.timestamp).getTime();
+          const dur = (ev.duration || 0) * 1000;
+          const left = ((start - minTime) / range) * 100;
+          const width = Math.max((dur / range) * 100, 0.3);
+          const c = repoColorMap[row.repo];
+          const tipText = `${row.repo}/${row.branch}${ev.data.file ? '  ' + ev.data.file : ''}<br>${fmtTime(ev.timestamp)} - ${fmtDuration(ev.duration || 0)}`;
+          html += `<div class="timeline-block" style="left:${left}%;width:${width}%;background:${c};" data-tip="${tipText.replace(/"/g, '&quot;')}"></div>`;
+        }
+        html += `</div></div>`;
+      }
+
+      /* axis */
+      const ticks = 6;
+      let axisHtml = '<div class="timeline-axis"><div class="timeline-axis-label"></div><div class="timeline-axis-ticks">';
+      for (let i = 0; i <= ticks; i++) {
+        const t = new Date(minTime + (range * i / ticks));
+        axisHtml += `<span>${fmtTime(t)}</span>`;
+      }
+      axisHtml += '</div></div>';
+      html += axisHtml;
+
+      container.innerHTML = html;
+
+      /* tooltip events */
+      container.addEventListener('mouseover', (e) => {
+        if (e.target.classList.contains('timeline-block')) {
+          tooltip.innerHTML = e.target.dataset.tip;
+          tooltip.style.display = 'block';
+        }
+      });
+      container.addEventListener('mousemove', (e) => {
+        tooltip.style.left = (e.clientX + 12) + 'px';
+        tooltip.style.top = (e.clientY - 8) + 'px';
+      });
+      container.addEventListener('mouseout', (e) => {
+        if (e.target.classList.contains('timeline-block')) {
+          tooltip.style.display = 'none';
+        }
+      });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  render: files                                                      */
+    /* ------------------------------------------------------------------ */
+    function renderFiles(data) {
+      populateRepoFilter('fileRepoFilter', data.repos, () => renderFilesTable(data));
+      renderFilesTable(data);
+    }
+
+    function renderFilesTable(data) {
+      const filterVal = document.getElementById('fileRepoFilter').value;
+      let files = data.byFile;
+      if (filterVal !== '__all__') {
+        files = files.filter(f => f.repo === filterVal);
+      }
+      files = files.sort((a,b) => b.duration - a.duration).slice(0, 50);
+
+      const tbody = document.getElementById('fileTableBody');
+      if (files.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No file data available.</td></tr>';
+        return;
+      }
+
+      const maxDur = files[0].duration || 1;
+      tbody.innerHTML = files.map(f => {
+        const pct = (f.duration / maxDur) * 100;
+        return `<tr>
+          <td class="path"><span class="repo-tag">${f.repo}</span>${f.file}</td>
+          <td>${f.branch}</td>
+          <td>${fmtDuration(f.duration)}</td>
+          <td class="duration-bar-cell">
+            <div class="duration-bar-bg"><div class="duration-bar-fill" style="width:${pct}%"></div></div>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  repo filter helper                                                 */
+    /* ------------------------------------------------------------------ */
+    function populateRepoFilter(selectId, repos, onChange) {
+      const sel = document.getElementById(selectId);
+      const current = sel.value;
+      sel.innerHTML = '<option value="__all__">All repos</option>';
+      for (const r of repos) {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r;
+        sel.appendChild(opt);
+      }
+      if (current && repos.includes(current)) sel.value = current;
+      sel.onchange = onChange;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  main                                                               */
+    /* ------------------------------------------------------------------ */
+    async function main() {
+      const { hostname, start, end, title } = params();
+      const meta = document.getElementById('headerMeta');
+      if (start && end) {
+        const s = new Date(start);
+        const e = new Date(end);
+        meta.textContent = `${fmtDate(s)} ${fmtTime(s)} - ${fmtDate(e)} ${fmtTime(e)}  |  ${hostname}`;
+      } else {
+        meta.textContent = hostname || '';
+      }
+
+      try {
+        const rawEvents = await fetchEvents();
+        document.getElementById('loadingIndicator').style.display = 'none';
+
+        if (!rawEvents || rawEvents.length === 0) {
+          document.getElementById('errorIndicator').style.display = 'block';
+          document.getElementById('errorIndicator').textContent = 'No git activity data found for this time range.';
+          document.getElementById('errorIndicator').style.color = 'var(--text-dim)';
+          return;
+        }
+
+        const data = aggregate(rawEvents);
+
+        /* show panels */
+        document.getElementById('panel-summary').style.display = '';
+
+        /* render all tabs eagerly so switching is instant */
+        renderSummary(data);
+        renderRepos(data);
+        renderBranches(data);
+        renderTimeline(data);
+        renderFiles(data);
+
+        /* show first panel */
+        document.querySelectorAll('.panel').forEach(p => p.style.display = '');
+
+      } catch (err) {
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('errorIndicator').style.display = 'block';
+        document.getElementById('errorIndicator').textContent = `Failed to load data: ${err.message}`;
+        console.error(err);
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  iframe auto-resize                                                 */
+    /* ------------------------------------------------------------------ */
+    function resizeIframe() {
+      try {
+        const frame = window.frameElement;
+        if (frame) {
+          const h = document.documentElement.scrollHeight;
+          frame.style.height = h + 'px';
+          frame.style.width = '100%';
+
+          /* widen the parent container to use full viewport */
+          let el = frame.parentElement;
+          while (el && el !== window.parent.document.body) {
+            if (el.classList.contains('container') || el.style.maxWidth || getComputedStyle(el).maxWidth !== 'none') {
+              el.style.maxWidth = '100%';
+            }
+            el = el.parentElement;
+          }
+        }
+      } catch (_) { /* cross-origin, ignore */ }
+    }
+
+    const resizeObserver = new ResizeObserver(() => resizeIframe());
+    resizeObserver.observe(document.body);
+
+    main();
+  </script>
+</body>
+</html>
