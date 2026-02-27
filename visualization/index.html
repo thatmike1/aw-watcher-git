@@ -63,6 +63,19 @@
       font-size: 0.8rem;
       color: var(--text-muted);
     }
+    .open-full {
+      font-size: 0.8rem;
+      color: var(--accent);
+      text-decoration: none;
+      border: 1px solid var(--accent);
+      padding: 4px 10px;
+      border-radius: 4px;
+      transition: background 0.15s;
+      display: none;
+    }
+    .open-full:hover {
+      background: var(--accent-soft);
+    }
 
     /* tabs */
     .tabs {
@@ -95,35 +108,95 @@
     .panel { display: none; }
     .panel.active { display: block; }
 
-    /* stat cards row */
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px;
-      margin-bottom: 24px;
+    /* summary: hero time + inline counts */
+    .summary-top {
+      display: flex;
+      align-items: baseline;
+      gap: 24px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
     }
-    .stat-card {
+    .hero-time {
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--accent) 0%, #ff8a80 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .counts {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .count-item {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+    .count-item .num {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .count-item .what {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    /* summary: top repo & branch cards */
+    .top-items {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 500px) {
+      .top-items { grid-template-columns: 1fr; }
+    }
+    .top-item {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 16px;
+      padding: 14px 16px;
+      min-width: 0;
     }
-    .stat-card .label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
+    .top-item .top-label {
+      font-size: 0.7rem;
+      color: var(--text-dim);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
-    .stat-card .value {
-      font-size: 1.5rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
+    .top-item .top-value {
+      font-size: 1.1rem;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .stat-card .sub {
+    .top-item .top-sub {
       font-size: 0.75rem;
       color: var(--text-dim);
-      margin-top: 2px;
+      margin-top: 1px;
+    }
+
+    /* summary bottom row — 2-col on wide, stacked on narrow */
+    .summary-bottom-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 800px) {
+      .summary-bottom-row {
+        grid-template-columns: 1fr;
+      }
+    }
+    /* keep doughnut from blowing up on wide screens */
+    .summary-bottom-row .chart-wrap canvas {
+      max-height: 260px;
     }
 
     /* chart containers */
@@ -368,7 +441,10 @@
   <div class="container">
     <div class="header">
       <h1><span>git</span> activity</h1>
-      <div class="header-meta" id="headerMeta"></div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <a class="open-full" id="openFull" href="#" target="_blank">open full page</a>
+        <div class="header-meta" id="headerMeta"></div>
+      </div>
     </div>
 
     <div class="tabs" id="tabsBar">
@@ -388,12 +464,13 @@
 
     <!-- summary panel -->
     <div class="panel active" id="panel-summary" style="display:none;">
-      <div class="stats-row" id="statsRow"></div>
+      <div class="summary-top" id="summaryTop"></div>
+      <div class="top-items" id="summaryTopItems"></div>
       <div class="chart-card">
         <h2>Time by repository</h2>
         <div class="chart-wrap"><canvas id="summaryRepoChart"></canvas></div>
       </div>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div class="summary-bottom-row">
         <div class="chart-card">
           <h2>Top branches</h2>
           <div class="chart-wrap"><canvas id="summaryBranchChart"></canvas></div>
@@ -621,27 +698,32 @@
     /*  render: summary                                                    */
     /* ------------------------------------------------------------------ */
     function renderSummary(data) {
-      /* stats */
       const topRepo = Object.entries(data.byRepo).sort((a,b) => b[1]-a[1])[0];
       const topBranch = data.byBranch.sort((a,b) => b.duration-a.duration)[0];
 
-      const stats = [
-        { label: 'Active time', value: fmtDuration(data.totalDuration) },
-        { label: 'Repositories', value: data.repoCount },
-        { label: 'Branches', value: data.branchCount },
-        { label: 'Files changed', value: data.fileCount },
-        { label: 'Top repo', value: topRepo ? topRepo[0] : '-', sub: topRepo ? fmtDuration(topRepo[1]) : '' },
-        { label: 'Top branch', value: topBranch ? topBranch.branch : '-', sub: topBranch ? `${topBranch.repo} - ${fmtDuration(topBranch.duration)}` : '' },
-      ];
-
-      const row = document.getElementById('statsRow');
-      row.innerHTML = stats.map(s => `
-        <div class="stat-card">
-          <div class="label">${s.label}</div>
-          <div class="value">${s.value}</div>
-          ${s.sub ? `<div class="sub">${s.sub}</div>` : ''}
+      /* hero time + counts */
+      document.getElementById('summaryTop').innerHTML = `
+        <div class="hero-time">${fmtDuration(data.totalDuration)}</div>
+        <div class="counts">
+          <div class="count-item"><span class="num">${data.repoCount}</span><span class="what">repos</span></div>
+          <div class="count-item"><span class="num">${data.branchCount}</span><span class="what">branches</span></div>
+          <div class="count-item"><span class="num">${data.fileCount}</span><span class="what">files</span></div>
         </div>
-      `).join('');
+      `;
+
+      /* top repo & branch */
+      document.getElementById('summaryTopItems').innerHTML = `
+        <div class="top-item">
+          <div class="top-label">top repo</div>
+          <div class="top-value">${topRepo ? topRepo[0] : '-'}</div>
+          <div class="top-sub">${topRepo ? fmtDuration(topRepo[1]) : ''}</div>
+        </div>
+        <div class="top-item">
+          <div class="top-label">top branch</div>
+          <div class="top-value">${topBranch ? topBranch.branch : '-'}</div>
+          <div class="top-sub">${topBranch ? `${topBranch.repo} \u00b7 ${fmtDuration(topBranch.duration)}` : ''}</div>
+        </div>
+      `;
 
       /* repo horizontal bar */
       const repoEntries = Object.entries(data.byRepo).sort((a,b) => b[1]-a[1]);
@@ -1088,6 +1170,20 @@
     /* ------------------------------------------------------------------ */
     async function main() {
       const { hostname, start, end, title } = params();
+
+      /* show "open full page" link when inside an iframe */
+      const openFullLink = document.getElementById('openFull');
+      try {
+        if (window.frameElement || window.parent !== window) {
+          openFullLink.style.display = 'inline-block';
+          openFullLink.href = window.location.href;
+        }
+      } catch (_) {
+        /* cross-origin iframe — build URL manually */
+        openFullLink.style.display = 'inline-block';
+        openFullLink.href = window.location.href;
+      }
+
       const meta = document.getElementById('headerMeta');
       if (start && end) {
         const s = new Date(start);
@@ -1140,16 +1236,6 @@
         if (frame) {
           const h = document.documentElement.scrollHeight;
           frame.style.height = h + 'px';
-          frame.style.width = '100%';
-
-          /* widen the parent container to use full viewport */
-          let el = frame.parentElement;
-          while (el && el !== window.parent.document.body) {
-            if (el.classList.contains('container') || el.style.maxWidth || getComputedStyle(el).maxWidth !== 'none') {
-              el.style.maxWidth = '100%';
-            }
-            el = el.parentElement;
-          }
         }
       } catch (_) { /* cross-origin, ignore */ }
     }
