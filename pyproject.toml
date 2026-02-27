@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aw-watcher-git"
+version = "0.1.0"
+description = "ActivityWatch watcher that tracks git repository activity via filesystem monitoring"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+dependencies = [
+    "aw-client>=0.5.14",
+    "watchdog>=4.0",
+]
+
+[project.scripts]
+aw-watcher-git = "aw_watcher_git:main"
+
