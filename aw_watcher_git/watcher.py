@@ -199,10 +199,9 @@ class GitActivityWatcher:
                         queued=False,
                     )
                     logger.info(
-                        "heartbeat: %s @ %s [%s]",
+                        "heartbeat: %s @ %s",
                         event_data["repo"],
                         event_data["branch"],
-                        event_data["file"],
                     )
 
                 time.sleep(self._poll_time)

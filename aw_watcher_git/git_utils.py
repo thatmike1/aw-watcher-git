@@ -79,7 +79,7 @@ def get_branch(repo_root: str) -> str:
 
 
 def get_repo_info(file_path: str) -> dict[str, str] | None:
-    """resolve repo name, branch, and relative file path for a changed file."""
+    """resolve repo name and branch for a changed file."""
     repo_root = get_repo_root(file_path)
     if repo_root is None:
         return None
@@ -87,15 +87,9 @@ def get_repo_info(file_path: str) -> dict[str, str] | None:
     repo_name = os.path.basename(repo_root)
     branch = get_branch(repo_root)
 
-    try:
-        rel_path = os.path.relpath(file_path, repo_root)
-    except ValueError:
-        rel_path = os.path.basename(file_path)
-
     return {
         "repo": repo_name,
         "branch": branch,
-        "file": rel_path,
     }
 
 

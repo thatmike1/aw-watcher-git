@@ -21,6 +21,9 @@ DEFAULT_CONFIG = {
         ".cache",
         ".turbo",
         "coverage",
+        ".playwright-mcp",
+        ".beads",
+        ".claude",
     ],
     "ignore_extensions": [
         ".pyc",
