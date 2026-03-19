@@ -9,7 +9,8 @@
       "Bash(grep:*)",
       "WebFetch(domain:api.github.com)",
       "Bash(curl:*)",
-      "Bash(cm context:*)"
+      "Bash(cm context:*)",
+      "Bash(python3:*)"
     ]
   }
 }

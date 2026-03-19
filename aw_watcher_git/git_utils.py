@@ -93,6 +93,22 @@ def get_repo_info(file_path: str) -> dict[str, str] | None:
     }
 
 
+def has_dirty_worktree(repo_root: str) -> bool:
+    """check if a repo has uncommitted changes (staged or unstaged)."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return bool(result.stdout.strip())
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.debug("failed to check git status for %s: %s", repo_root, e)
+        return False
+
+
 def invalidate_branch_cache(repo_root: str) -> None:
     """clear cached branch for a repo so it's re-read on next access."""
     _branch_cache.pop(repo_root, None)
