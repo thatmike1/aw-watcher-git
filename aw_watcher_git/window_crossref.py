@@ -1,7 +1,10 @@
 """cross-references aw-watcher-window and aw-watcher-afk to detect dev activity in tracked repos."""
 
 import logging
+import os
 import re
+from collections import defaultdict
+from pathlib import Path
 
 logger = logging.getLogger("aw-watcher-git")
 
@@ -21,6 +24,62 @@ DEV_APPS: set[str] = {
 
 _CURSOR_PROJECT_RE = re.compile(r" - (.+) - Cursor$")
 _WARP_CWD_RE = re.compile(r"~/git/([^/\s]+)")
+_WARP_LAUNCH_DIR = Path.home() / ".local" / "share" / "warp-terminal" / "launch_configurations"
+
+
+def _scan_warp_launch_configs() -> dict[str, str]:
+    """scan warp terminal launch configs to build a tab-title-to-repo-name mapping.
+
+    parses yaml files in ~/.local/share/warp-terminal/launch_configurations/
+    to extract tab titles and their associated cwds. skips ambiguous titles
+    that map to multiple repos.
+    """
+    if not _WARP_LAUNCH_DIR.is_dir():
+        return {}
+
+    # lightweight yaml parsing - these files have a simple structure
+    title_to_repos: dict[str, set[str]] = defaultdict(set)
+
+    for yaml_path in _WARP_LAUNCH_DIR.glob("*.yaml"):
+        try:
+            content = yaml_path.read_text()
+        except OSError:
+            continue
+
+        # extract title/cwd pairs from the yaml
+        # the structure is consistent: title and cwd appear as sibling fields under tabs
+        current_title = None
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- title:"):
+                current_title = stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("cwd:") and current_title:
+                cwd = stripped.split(":", 1)[1].strip()
+                repo_name = os.path.basename(cwd)
+                if repo_name and current_title:
+                    # normalize the title: strip leading "N. " prefix and trailing numbers/spaces
+                    normalized = re.sub(r"^\d+\.\s*", "", current_title)
+                    normalized = re.sub(r"[\s\d]+$", "", normalized).lower()
+                    if normalized:
+                        title_to_repos[normalized].add(repo_name)
+                current_title = None
+
+    # only keep unambiguous mappings (title maps to exactly one repo)
+    aliases: dict[str, str] = {}
+    for title, repos in title_to_repos.items():
+        if len(repos) == 1:
+            repo = next(iter(repos))
+            aliases[title] = repo
+            # also add with -cc suffix stripped
+            base = re.sub(r"-cc$", "", title)
+            if base != title and base not in aliases:
+                aliases[base] = repo
+            # also add with "claude" suffix stripped
+            base = re.sub(r"claude$", "", title)
+            if base != title and base not in aliases:
+                aliases[base] = repo
+
+    return aliases
 
 
 class WindowCrossReferencer:
@@ -38,7 +97,16 @@ class WindowCrossReferencer:
         self._afk_bucket = f"aw-watcher-afk_{hostname}"
         self._watched_repos = set(watched_repos)
         self._watched_repos_lower = {r.lower(): r for r in watched_repos}
-        self._repo_aliases = {k.lower(): v for k, v in repo_aliases.items()}
+
+        # auto-scan warp launch configs, then overlay explicit config aliases
+        auto_aliases = _scan_warp_launch_configs()
+        merged = {k: v for k, v in auto_aliases.items()}
+        merged.update({k.lower(): v for k, v in repo_aliases.items()})
+        self._repo_aliases = merged
+        if auto_aliases:
+            logger.info(
+                "loaded %d aliases from warp launch configs", len(auto_aliases)
+            )
 
     def get_active_repo(self, afk_aware: bool = True) -> str | None:
         """return the repo name if the user is actively working on a tracked repo, else None.
@@ -120,10 +188,11 @@ class WindowCrossReferencer:
             if resolved:
                 return resolved
 
-        # alias lookup: strip trailing numbers and whitespace, try progressively shorter prefixes
+        # alias lookup: normalize the title to match how warp config aliases are built
         title_lower = title.lower().strip()
-        # try the full title (minus trailing digits/spaces) as an alias
-        alias_candidate = re.sub(r"[\s\d]+$", "", title_lower)
+        # strip leading "N. " prefix and trailing digits/spaces
+        alias_candidate = re.sub(r"^\d+\.\s*", "", title_lower)
+        alias_candidate = re.sub(r"[\s\d]+$", "", alias_candidate)
         resolved = self._resolve_alias(alias_candidate)
         if resolved:
             return resolved
