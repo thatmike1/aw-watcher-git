@@ -208,6 +208,8 @@ class GitActivityWatcher:
                     hostname=hostname,
                     watched_repos=list(repo_paths.keys()),
                     repo_aliases=self._config.get("repo_aliases", {}),
+                    repo_paths=repo_paths,
+                    personal_repos=self._config.get("personal_repos", []),
                 )
                 logger.info("window cross-referencing enabled")
             except Exception:

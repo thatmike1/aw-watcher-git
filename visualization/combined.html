@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>combined activity</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --bg-card: #16213e;
+      --bg-card-hover: #1a2744;
+      --text: #eee;
+      --text-muted: #8892a4;
+      --text-dim: #7a8599;
+      --border: #233554;
+      --accent: #e94560;
+      --accent-soft: rgba(233, 69, 96, 0.15);
+      --green: #5dd39e;
+      --yellow: #f6c177;
+      --blue: #73d8ff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      font-size: 0.9rem;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-card); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 16px 20px; }
+    .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+    .header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.02em; }
+    .header h1 span { color: var(--accent); }
+    .header-meta { font-size: 0.75rem; color: var(--text-muted); }
+    .open-full {
+      font-size: 0.75rem;
+      color: var(--accent);
+      text-decoration: none;
+      border: 1px solid var(--accent);
+      padding: 4px 10px;
+      border-radius: 4px;
+      transition: background 0.15s;
+      display: none;
+    }
+    .open-full:hover { background: var(--accent-soft); }
+
+    .hero {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .hero-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .hero-time {
+      font-size: 3.2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      margin: 6px 0 4px;
+      background: linear-gradient(135deg, var(--accent) 0%, #ff8a80 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+    }
+
+    .summary {
+      display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .stat {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      flex: 1;
+      min-width: 100px;
+    }
+    .stat-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-value { font-size: 1.1rem; font-weight: 600; margin-top: 2px; }
+    .stat-value.accent { color: var(--accent); }
+    .stat-value.green { color: var(--green); }
+    .stat-value.blue { color: var(--blue); }
+
+    .panels {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 800px) {
+      .panels { grid-template-columns: 1fr 1fr; }
+      .panels > .full { grid-column: 1 / -1; }
+    }
+
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+    }
+    .panel h2 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tree { font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    .tree-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 3px 0;
+      gap: 10px;
+    }
+    .tree-row.lvl-0 { font-weight: 600; padding-top: 6px; }
+    .tree-row.lvl-1 { padding-left: 14px; color: var(--text); }
+    .tree-row.lvl-2 { padding-left: 28px; color: var(--text-muted); font-size: 0.8rem; }
+    .tree-row.lvl-0:hover, .tree-row.lvl-1:hover, .tree-row.lvl-2:hover { background: var(--bg-card-hover); }
+    .tree-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tree-row .dur { color: var(--text-dim); white-space: nowrap; font-size: 0.8rem; }
+    .tree-row.lvl-0 .dur { color: var(--accent); font-size: 0.85rem; }
+
+    .empty { color: var(--text-muted); font-style: italic; padding: 10px 0; }
+    .error { color: var(--accent); padding: 10px 0; }
+    .loading { color: var(--text-muted); padding: 10px 0; }
+
+    .legend { font-size: 0.7rem; color: var(--text-dim); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1><span>combined</span> activity</h1>
+      <a class="open-full" id="openFull" href="#" target="_blank">open full page</a>
+      <div class="header-meta" id="headerMeta">loading...</div>
+    </div>
+
+    <div class="hero">
+      <div class="hero-label">time worked</div>
+      <div class="hero-time" id="heroTime">--</div>
+      <div class="hero-sub" id="heroSub">loading...</div>
+    </div>
+
+    <div class="summary" id="summary"></div>
+
+    <div class="panels">
+      <div class="panel full">
+        <h2>work breakdown</h2>
+        <div class="tree" id="workTree"><div class="loading">loading...</div></div>
+      </div>
+      <div class="panel full">
+        <h2>by project (git watcher)</h2>
+        <div class="tree" id="projectTree"><div class="loading">loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ------------------------------------------------------------------ */
+    /*  helpers                                                            */
+    /* ------------------------------------------------------------------ */
+    function params() {
+      const p = new URLSearchParams(window.location.search);
+      return {
+        hostname: p.get('hostname') || '',
+        start: p.get('start') || '',
+        end: p.get('end') || '',
+      };
+    }
+
+    function fmtDur(seconds) {
+      seconds = Math.round(seconds);
+      if (seconds < 60) return `${seconds}s`;
+      if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+      const h = Math.floor(seconds / 3600);
+      const m = Math.round((seconds % 3600) / 60);
+      return `${h}h ${m}m`;
+    }
+
+    function getBaseUrl() {
+      let baseUrl = '';
+      try {
+        if (window.parent !== window && window.parent.location.origin) {
+          baseUrl = window.parent.location.origin;
+        }
+      } catch (_) { /* cross-origin */ }
+      if (!baseUrl) {
+        baseUrl = window.location.origin !== 'null'
+          ? window.location.origin
+          : `${window.location.protocol}//${window.location.host}`;
+      }
+      return baseUrl;
+    }
+
+    async function fetchBucket(bucketId, start, end) {
+      const baseUrl = getBaseUrl();
+      const url = new URL(`/api/0/buckets/${encodeURIComponent(bucketId)}/events`, baseUrl);
+      if (start) url.searchParams.set('start', start);
+      if (end)   url.searchParams.set('end', end);
+      url.searchParams.set('limit', '-1');
+      const res = await fetch(url.toString());
+      if (!res.ok) throw new Error(`API ${res.status} for ${bucketId}`);
+      return res.json();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  app categorization                                                  */
+    /* ------------------------------------------------------------------ */
+    /* known personal/non-work title patterns — anything matching these is excluded
+       even when in a browser. everything else in a browser is assumed to be work. */
+    const PERSONAL_PATTERNS = [
+      /youtube/i, /youtu\.be/i, /reddit/i, /facebook/i, /twitter/i, /instagram/i,
+      /netflix/i, /spotify/i, /deezer/i, /braflix/i, /binged\.live/i, /alza/i,
+      /twitch/i, /tiktok/i, /9gag/i,
+    ];
+
+    function classify(app, title) {
+      app = (app || '').toLowerCase();
+      title = title || '';
+
+      // terminal: claude code is ambiguous (could be personal), regular terminal is work
+      if (app.includes('warp') || app.includes('ghostty') || app.includes('kitty') ||
+          app.includes('alacritty') || app.includes('wezterm')) {
+        if (/^✳\s/.test(title)) return { kind: 'ambiguous', label: 'Claude Code' };
+        return { kind: 'work', label: 'Terminal' };
+      }
+      if (app.includes('cursor')) return { kind: 'work', label: 'Cursor' };
+      if (app === 'code' || app.includes('vscode')) return { kind: 'work', label: 'VS Code' };
+      if (app === 'zed') return { kind: 'work', label: 'Zed' };
+      if (app.includes('obsidian')) return { kind: 'work', label: 'Obsidian' };
+
+      // browsers: split by title — personal patterns → personal, else work
+      if (app.includes('firefox') || app.includes('chrome') || app.includes('chromium') || app.includes('brave')) {
+        for (const re of PERSONAL_PATTERNS) {
+          if (re.test(title)) return { kind: 'personal', label: 'Browser (personal)' };
+        }
+        return { kind: 'work', label: 'Browser (work)' };
+      }
+
+      // anything else: don't count
+      return { kind: 'other', label: app || '(other)' };
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  build a per-second timeline of window events                        */
+    /*  used for fast lookup of "what app was active at time T"            */
+    /* ------------------------------------------------------------------ */
+    function buildWindowIndex(windowEvents) {
+      // sort by start time
+      const sorted = windowEvents
+        .map(ev => ({
+          start: new Date(ev.timestamp).getTime(),
+          end: new Date(ev.timestamp).getTime() + (ev.duration || 0) * 1000,
+          app: ev.data?.app || '',
+          title: ev.data?.title || '',
+        }))
+        .sort((a, b) => a.start - b.start);
+      return sorted;
+    }
+
+    function lookupWindowAt(windowIdx, ts) {
+      // binary search: find rightmost window with start <= ts
+      let lo = 0, hi = windowIdx.length - 1, best = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (windowIdx[mid].start <= ts) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      if (best === -1) return null;
+      const w = windowIdx[best];
+      if (ts <= w.end) return w;
+      return null;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  build afk index for filtering                                       */
+    /* ------------------------------------------------------------------ */
+    function buildAfkIndex(afkEvents) {
+      return afkEvents
+        .map(ev => ({
+          start: new Date(ev.timestamp).getTime(),
+          end: new Date(ev.timestamp).getTime() + (ev.duration || 0) * 1000,
+          status: ev.data?.status || 'unknown',
+        }))
+        .sort((a, b) => a.start - b.start);
+    }
+
+    function isAfkAt(afkIdx, ts) {
+      let lo = 0, hi = afkIdx.length - 1, best = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (afkIdx[mid].start <= ts) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      if (best === -1) return false;
+      const a = afkIdx[best];
+      if (ts <= a.end) return a.status === 'afk';
+      return false;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  rendering helpers                                                   */
+    /* ------------------------------------------------------------------ */
+    function renderTree(container, rows) {
+      if (!rows.length) {
+        container.innerHTML = '<div class="empty">no data</div>';
+        return;
+      }
+      container.innerHTML = rows
+        .map(r => `<div class="tree-row lvl-${r.level}">
+          <span class="name">${escapeHtml(r.name)}</span>
+          <span class="dur">${fmtDur(r.duration)}</span>
+        </div>`)
+        .join('');
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  main                                                                */
+    /* ------------------------------------------------------------------ */
+    async function main() {
+      const { hostname, start, end } = params();
+      const host = hostname || (await detectHostname());
+
+      /* show "open full page" link when inside an iframe */
+      const openFullLink = document.getElementById('openFull');
+      try {
+        if (window.frameElement || window.parent !== window) {
+          openFullLink.style.display = 'inline-block';
+          openFullLink.href = window.location.href;
+        }
+      } catch (_) {
+        openFullLink.style.display = 'inline-block';
+        openFullLink.href = window.location.href;
+      }
+
+      document.getElementById('headerMeta').textContent =
+        `${start ? new Date(start).toLocaleString() : '?'} → ${end ? new Date(end).toLocaleString() : '?'} | ${host || 'unknown host'}`;
+
+      const gitBucket = `aw-watcher-git_${host}`;
+      const winBucket = `aw-watcher-window_${host}`;
+      const afkBucket = `aw-watcher-afk_${host}`;
+
+      let gitEvents, winEvents, afkEvents;
+      try {
+        [gitEvents, winEvents, afkEvents] = await Promise.all([
+          fetchBucket(gitBucket, start, end).catch(() => []),
+          fetchBucket(winBucket, start, end).catch(() => []),
+          fetchBucket(afkBucket, start, end).catch(() => []),
+        ]);
+      } catch (e) {
+        document.getElementById('projectTree').innerHTML = `<div class="error">${e.message}</div>`;
+        return;
+      }
+
+      const winIdx = buildWindowIndex(winEvents);
+      const afkIdx = buildAfkIndex(afkEvents);
+
+      /* --- by project (git bucket aggregation) --- */
+      const repoTotals = {};
+      const branchTotals = {};
+      let gitTotal = 0;
+      for (const ev of gitEvents) {
+        const repo = ev.data?.repo || 'unknown';
+        const branch = ev.data?.branch || 'unknown';
+        const dur = ev.duration || 0;
+        gitTotal += dur;
+        repoTotals[repo] = (repoTotals[repo] || 0) + dur;
+        const key = `${repo}\u0000${branch}`;
+        branchTotals[key] = (branchTotals[key] || 0) + dur;
+      }
+
+      const projectRows = [];
+      const sortedRepos = Object.entries(repoTotals).sort((a, b) => b[1] - a[1]);
+      for (const [repo, dur] of sortedRepos) {
+        projectRows.push({ level: 0, name: repo, duration: dur });
+        const branches = Object.entries(branchTotals)
+          .filter(([k]) => k.startsWith(repo + '\u0000'))
+          .map(([k, d]) => ({ branch: k.split('\u0000')[1], duration: d }))
+          .sort((a, b) => b.duration - a.duration);
+        for (const b of branches) {
+          projectRows.push({ level: 1, name: b.branch, duration: b.duration });
+        }
+      }
+      renderTree(document.getElementById('projectTree'), projectRows);
+
+      /* --- build git event timeline for cross-referencing ambiguous events --- */
+      const gitIdx = gitEvents
+        .map(ev => ({
+          start: new Date(ev.timestamp).getTime(),
+          end: new Date(ev.timestamp).getTime() + (ev.duration || 0) * 1000,
+        }))
+        .sort((a, b) => a.start - b.start);
+
+      function hasGitOverlap(ts, dur) {
+        // check if a window event overlaps any git event (= confirmed work)
+        const evEnd = ts + dur * 1000;
+        // binary search for first git event that could overlap
+        let lo = 0, hi = gitIdx.length - 1, best = -1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (gitIdx[mid].start <= evEnd) { best = mid; lo = mid + 1; }
+          else { hi = mid - 1; }
+        }
+        // check backwards from best for overlap
+        for (let i = best; i >= 0 && i >= best - 10; i--) {
+          const g = gitIdx[i];
+          if (g.end < ts) continue;
+          if (g.start <= evEnd && g.end >= ts) return true;
+        }
+        return false;
+      }
+
+      /* --- classify all window events, AFK-filtered --- */
+      const workTotals = {};
+      let workTotal = 0;
+      let personalTotal = 0;
+      let ambiguousTotal = 0;
+      let otherTotal = 0;
+      let afkTotal = 0;
+      for (const ev of winEvents) {
+        const dur = ev.duration || 0;
+        const ts = new Date(ev.timestamp).getTime();
+        if (isAfkAt(afkIdx, ts)) { afkTotal += dur; continue; }
+        const c = classify(ev.data?.app, ev.data?.title);
+        if (c.kind === 'work') {
+          workTotals[c.label] = (workTotals[c.label] || 0) + dur;
+          workTotal += dur;
+        } else if (c.kind === 'ambiguous') {
+          // claude code: only count as work if there's a concurrent git heartbeat
+          if (hasGitOverlap(ts, dur)) {
+            workTotals['Claude Code (work)'] = (workTotals['Claude Code (work)'] || 0) + dur;
+            workTotal += dur;
+          } else {
+            ambiguousTotal += dur;
+          }
+        } else if (c.kind === 'personal') {
+          personalTotal += dur;
+        } else {
+          otherTotal += dur;
+        }
+      }
+
+      const workRows = Object.entries(workTotals)
+        .sort((a, b) => b[1] - a[1])
+        .map(([label, dur]) => ({ level: 0, name: label, duration: dur }));
+      renderTree(document.getElementById('workTree'), workRows);
+
+      /* --- hero --- */
+      document.getElementById('heroTime').textContent = fmtDur(workTotal);
+      const parts = [`non-afk time in dev tools and work browser tabs`];
+      if (ambiguousTotal > 0) parts.push(`claude code (unconfirmed): ${fmtDur(ambiguousTotal)}`);
+      if (personalTotal > 0) parts.push(`personal: ${fmtDur(personalTotal)}`);
+      parts.push(`afk: ${fmtDur(afkTotal)}`);
+      document.getElementById('heroSub').textContent = parts.join(' · ');
+
+      /* --- summary stats --- */
+      const summary = document.getElementById('summary');
+      summary.innerHTML = `
+        <div class="stat">
+          <div class="stat-label">work</div>
+          <div class="stat-value accent">${fmtDur(workTotal)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">git tracked</div>
+          <div class="stat-value blue">${fmtDur(gitTotal)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">cc (unconfirmed)</div>
+          <div class="stat-value" style="color:var(--yellow)">${fmtDur(ambiguousTotal)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">personal</div>
+          <div class="stat-value">${fmtDur(personalTotal)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">afk</div>
+          <div class="stat-value">${fmtDur(afkTotal)}</div>
+        </div>
+      `;
+    }
+
+    async function detectHostname() {
+      try {
+        const baseUrl = getBaseUrl();
+        const res = await fetch(`${baseUrl}/api/0/buckets/`);
+        if (!res.ok) return '';
+        const buckets = await res.json();
+        for (const id of Object.keys(buckets)) {
+          const m = id.match(/^aw-watcher-window_(.+)$/);
+          if (m) return m[1];
+        }
+      } catch (_) {}
+      return '';
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  iframe auto-resize                                                  */
+    /* ------------------------------------------------------------------ */
+    function resizeIframe() {
+      try {
+        const frame = window.frameElement;
+        if (frame) {
+          const h = document.documentElement.scrollHeight;
+          frame.style.height = h + 'px';
+        }
+      } catch (_) { /* cross-origin, ignore */ }
+    }
+
+    const resizeObserver = new ResizeObserver(() => resizeIframe());
+    resizeObserver.observe(document.body);
+
+    main();
+  </script>
+</body>
+</html>

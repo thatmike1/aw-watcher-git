@@ -23,8 +23,41 @@ DEV_APPS: set[str] = {
 }
 
 _CURSOR_PROJECT_RE = re.compile(r" - (.+) - Cursor$")
-_WARP_CWD_RE = re.compile(r"~/git/([^/\s]+)")
+# matches ~/git/repo or /home/user/git/repo (handles both tilde and full path)
+_WARP_CWD_RE = re.compile(r"(?:~/git|/[^/\s]+/git)/([^/\s]+)")
+# warp shows "✳ Claude Code" or "✳ <conversation-name>" when claude code is active
+_WARP_CLAUDE_CODE_RE = re.compile(r"^✳\s")
 _WARP_LAUNCH_DIR = Path.home() / ".local" / "share" / "warp-terminal" / "launch_configurations"
+
+
+def _find_claude_code_cwds() -> list[str]:
+    """scan /proc for running claude code processes and return their working directories.
+
+    reads /proc/<pid>/cmdline to find processes containing "claude" in argv[0],
+    then reads /proc/<pid>/cwd to get their working directory.
+    """
+    cwds = []
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            pid = entry
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    cmdline = f.read()
+                # cmdline is null-separated, argv[0] is the executable
+                argv0 = cmdline.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+                # match "claude" binary (could be /home/user/.claude/local/claude or similar)
+                basename = os.path.basename(argv0)
+                if basename != "claude":
+                    continue
+                cwd = os.readlink(f"/proc/{pid}/cwd")
+                cwds.append(cwd)
+            except (OSError, PermissionError, UnicodeDecodeError):
+                continue
+    except OSError:
+        pass
+    return cwds
 
 
 def _scan_warp_launch_configs() -> dict[str, str]:
@@ -91,12 +124,23 @@ class WindowCrossReferencer:
         hostname: str,
         watched_repos: list[str],
         repo_aliases: dict[str, str],
+        repo_paths: dict[str, str] | None = None,
+        personal_repos: list[str] | None = None,
     ) -> None:
         self._client = client
         self._window_bucket = f"aw-watcher-window_{hostname}"
         self._afk_bucket = f"aw-watcher-afk_{hostname}"
         self._watched_repos = set(watched_repos)
         self._watched_repos_lower = {r.lower(): r for r in watched_repos}
+        self._personal_repos = set(personal_repos or [])
+
+        # repo_paths: repo_name -> absolute path (e.g. "cez-ems" -> "/home/user/git/cez-ems")
+        # used to match claude code process CWDs against watched repos
+        self._repo_path_to_name: dict[str, str] = {}
+        if repo_paths:
+            for name, path in repo_paths.items():
+                if name not in self._personal_repos:
+                    self._repo_path_to_name[os.path.realpath(path)] = name
 
         # auto-scan warp launch configs, then overlay explicit config aliases
         auto_aliases = _scan_warp_launch_configs()
@@ -136,7 +180,62 @@ class WindowCrossReferencer:
         app = data.get("app", "")
         title = data.get("title", "")
 
-        return self._extract_repo(app, title)
+        repo = self._extract_repo(app, title)
+        if repo:
+            return repo
+
+        # fallback: warp is showing a claude code session (no repo info in title)
+        # scan /proc for running claude processes and match their CWD against watched repos
+        if app == "dev.warp.Warp" and _WARP_CLAUDE_CODE_RE.search(title):
+            repo = self._detect_claude_code_repo()
+            if repo:
+                return repo
+
+        return None
+
+    def _detect_claude_code_repo(self) -> str | None:
+        """detect which watched repo the active claude code session is running in.
+
+        scans /proc for claude processes, reads their CWD, and matches
+        against the watched repo paths. if multiple claude processes are
+        running in watched repos, returns the one that was most recently
+        scheduled (likely the focused pane).
+        """
+        if not self._repo_path_to_name:
+            return None
+
+        cwds = _find_claude_code_cwds()
+        if not cwds:
+            return None
+
+        # match CWDs against watched repo paths (deduplicate by repo name)
+        matched_repos: set[str] = set()
+        for cwd in cwds:
+            real_cwd = os.path.realpath(cwd)
+            repo_name = self._repo_path_to_name.get(real_cwd)
+            if repo_name:
+                matched_repos.add(repo_name)
+
+        if not matched_repos:
+            logger.debug(
+                "claude code detected, %d processes found but none in work repos (cwds: %s)",
+                len(cwds),
+                cwds,
+            )
+            return None
+
+        if len(matched_repos) == 1:
+            repo = next(iter(matched_repos))
+            logger.debug("claude code in work repo: %s", repo)
+            return repo
+
+        # multiple distinct work repos — can't determine which is focused,
+        # so skip to avoid attributing to the wrong repo
+        logger.debug(
+            "claude code detected in multiple work repos: %s — skipping",
+            matched_repos,
+        )
+        return None
 
     def _extract_repo(self, app: str, title: str) -> str | None:
         """try to extract a repo name from the app and window title."""

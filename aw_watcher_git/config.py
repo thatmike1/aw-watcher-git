@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ DEFAULT_CONFIG = {
     "afk_aware": True,
     "git_status_interval": 60.0,
     "repo_aliases": {},
+    "personal_repos": [],
 }
 
 
@@ -44,12 +46,22 @@ def load_config() -> dict:
     config = dict(DEFAULT_CONFIG)
 
     try:
-        from aw_core.config import load_config_toml
+        from aw_core.dirs import get_config_dir
+        import tomlkit
 
-        toml_config = load_config_toml("aw-watcher-git", DEFAULT_CONFIG)
-        config.update(toml_config)
+        config_dir = get_config_dir("aw-watcher-git")
+        config_file = os.path.join(config_dir, "aw-watcher-git.toml")
+
+        if os.path.isfile(config_file):
+            with open(config_file) as f:
+                toml_config = tomlkit.load(f)
+            # aw config files use [aw-watcher-git] as the section header
+            section = toml_config.get("aw-watcher-git", toml_config)
+            for key, value in section.items():
+                config[key] = value
+            logger.info("loaded config from %s", config_file)
     except ImportError:
-        logger.info("aw-core config not available, using defaults")
+        logger.info("tomlkit not available, using defaults")
     except Exception as e:
         logger.warning("failed to load TOML config: %s, using defaults", e)
 

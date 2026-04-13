@@ -1,0 +1,304 @@
+{
+  "categories": [
+    {
+      "id": 0,
+      "name": ["ALL"],
+      "rule": { "type": "none" },
+      "data": { "color": "#FB9E00" }
+    },
+    {
+      "id": 1,
+      "name": ["Uncategorized"],
+      "rule": { "type": "none" },
+      "data": { "color": "#333333" }
+    },
+
+    {
+      "id": 10,
+      "name": ["ALL", "Work"],
+      "rule": { "type": "none" },
+      "data": { "color": "#194D33" }
+    },
+
+    {
+      "id": 11,
+      "name": ["ALL", "Work", "Code"],
+      "rule": { "regex": "Cursor|cursor|Code|code|Zed|zed", "type": "regex" },
+      "data": { "color": "#0062FF" }
+    },
+    {
+      "id": 12,
+      "name": ["ALL", "Work", "Code", "Cursor"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "Cursor|cursor",
+        "type": "regex"
+      },
+      "data": { "color": "#000000" }
+    },
+
+    {
+      "id": 20,
+      "name": ["ALL", "Work", "Terminal"],
+      "rule": {
+        "regex": "dev\\.warp\\.Warp|thatmike1@thatmike1",
+        "type": "regex"
+      },
+      "data": { "color": "#73D8FF" }
+    },
+    {
+      "id": 21,
+      "name": ["ALL", "Work", "Terminal", "Claude Code"],
+      "rule": { "regex": "✳", "type": "regex" },
+      "data": { "color": "#E27300" }
+    },
+
+    {
+      "id": 30,
+      "name": ["ALL", "Work", "Obsidian"],
+      "rule": { "ignore_case": true, "regex": "obsidian", "type": "regex" },
+      "data": {}
+    },
+
+    {
+      "id": 40,
+      "name": ["ALL", "Work", "Browser"],
+      "rule": { "ignore_case": true, "regex": "firefox", "type": "regex" },
+      "data": { "color": "#194D33" }
+    },
+    {
+      "id": 41,
+      "name": ["ALL", "Work", "Browser", "GitLab"],
+      "rule": {
+        "ignore_case": false,
+        "regex": "gitlab\\.atreo\\.cz|GitLab",
+        "type": "regex"
+      },
+      "data": { "color": "#FE9200" }
+    },
+    {
+      "id": 42,
+      "name": ["ALL", "Work", "Browser", "Localhost"],
+      "rule": { "regex": "localhost:", "type": "regex" },
+      "data": { "color": "#AEA1FF" }
+    },
+    {
+      "id": 43,
+      "name": ["ALL", "Work", "Browser", "Mattermost / Teams"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "mattermost\\.atreo\\.cz|Mattermost|Microsoft Teams|MS Teams",
+        "type": "regex"
+      },
+      "data": { "color": "#0062B1" }
+    },
+    {
+      "id": 44,
+      "name": ["ALL", "Work", "Browser", "AI Tools"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "claude\\.ai|chat\\.openai\\.com|ChatGPT|chat gpt",
+        "type": "regex"
+      },
+      "data": { "color": "#FDA1FF" }
+    },
+    {
+      "id": 45,
+      "name": ["ALL", "Work", "Browser", "Google Meet"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "Google Meet|meet\\.google\\.com|Synchro ČEZ",
+        "type": "regex"
+      },
+      "data": { "color": "#68BC00" }
+    },
+    {
+      "id": 46,
+      "name": ["ALL", "Work", "Browser", "Google Docs"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "docs\\.google\\.com|Sheets|Google Docs",
+        "type": "regex"
+      },
+      "data": { "color": "#6f8d6f" }
+    },
+    {
+      "id": 47,
+      "name": ["ALL", "Work", "Browser", "Manapp"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "manapp\\.atreo\\.cz|Manapp",
+        "type": "regex"
+      },
+      "data": { "color": "#A4FF00" }
+    },
+    {
+      "id": 48,
+      "name": ["ALL", "Work", "Browser", "ClickUp"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "clickup\\.com|ClickUp",
+        "type": "regex"
+      },
+      "data": {}
+    },
+    {
+      "id": 49,
+      "name": ["ALL", "Work", "Browser", "Stack Overflow"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "stackoverflow\\.com",
+        "type": "regex"
+      },
+      "data": { "color": "#f3a696" }
+    },
+    {
+      "id": 50,
+      "name": ["ALL", "Work", "Browser", "v0"],
+      "rule": {
+        "ignore_case": false,
+        "regex": "v0\\.dev|v0 by Vercel",
+        "type": "regex"
+      },
+      "data": {}
+    },
+    {
+      "id": 51,
+      "name": ["ALL", "Work", "Browser", "ČEZ / EMS"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "cez\\.atreo\\.cz|esco\\.cz|vose\\.cz|ČEZ ESCO|cez-ems|EMS Portal",
+        "type": "regex"
+      },
+      "data": {}
+    },
+    {
+      "id": 52,
+      "name": ["ALL", "Work", "Browser", "najdizaskok"],
+      "rule": { "ignore_case": true, "regex": "najdizaskok", "type": "regex" },
+      "data": {}
+    },
+    {
+      "id": 53,
+      "name": ["ALL", "Work", "Browser", "ActivityWatch"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "ActivityWatch|localhost:5600",
+        "type": "regex"
+      },
+      "data": {}
+    },
+    {
+      "id": 54,
+      "name": ["ALL", "Work", "Browser", "babylonjs"],
+      "rule": {
+        "ignore_case": false,
+        "regex": "forum\\.babylonjs\\.com|playground\\.babylonjs\\.com",
+        "type": "regex"
+      },
+      "data": { "color": "#C45100" }
+    },
+    {
+      "id": 55,
+      "name": ["ALL", "Work", "Browser", "Adminer"],
+      "rule": { "regex": "localhost:1111", "type": "regex" },
+      "data": { "color": "#7B64FF" }
+    },
+    {
+      "id": 56,
+      "name": ["ALL", "Work", "Browser", "3D Plánovač / B2B"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "3D Plánovač kanceláře|B2B Partner|B2B Administrace",
+        "type": "regex"
+      },
+      "data": {}
+    },
+    {
+      "id": 57,
+      "name": ["ALL", "Work", "Browser", "Metrie"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "Metrie - konfigurátor|partner\\.loc|Detail Objednávky",
+        "type": "regex"
+      },
+      "data": {}
+    },
+    {
+      "id": 58,
+      "name": ["ALL", "Work", "Browser", "PayPal"],
+      "rule": { "ignore_case": true, "regex": "paypal", "type": "regex" },
+      "data": {}
+    },
+    {
+      "id": 59,
+      "name": ["ALL", "Work", "Browser", "MailSpons"],
+      "rule": { "ignore_case": true, "regex": "mailspons", "type": "regex" },
+      "data": {}
+    },
+
+    {
+      "id": 70,
+      "name": ["ALL", "Browser"],
+      "rule": { "ignore_case": true, "regex": "firefox", "type": "regex" },
+      "data": { "color": "#F44E3B" }
+    },
+    {
+      "id": 71,
+      "name": ["ALL", "Browser", "Video"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "youtube\\.com|youtu\\.be|braflix|binged\\.live|Plex|VLC",
+        "type": "regex"
+      },
+      "data": { "color": "#F33" }
+    },
+    {
+      "id": 72,
+      "name": ["ALL", "Browser", "Music"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "Spotify|Deezer",
+        "type": "regex"
+      },
+      "data": { "color": "#A8FC00" }
+    },
+    {
+      "id": 73,
+      "name": ["ALL", "Browser", "Social"],
+      "rule": {
+        "ignore_case": true,
+        "regex": "reddit\\.com|facebook\\.com|Twitter|Instagram|devRant",
+        "type": "regex"
+      },
+      "data": { "color": "#FCC400" }
+    },
+    {
+      "id": 74,
+      "name": ["ALL", "Browser", "Shopping"],
+      "rule": { "ignore_case": true, "regex": "alza\\.cz", "type": "regex" },
+      "data": {}
+    },
+    {
+      "id": 75,
+      "name": ["ALL", "Browser", "Comms"],
+      "rule": { "type": "none" },
+      "data": { "color": "#9FF" }
+    },
+    {
+      "id": 76,
+      "name": ["ALL", "Browser", "Comms", "IM"],
+      "rule": {
+        "regex": "Messenger|Telegram|Signal|WhatsApp|Rambox|Slack|Discord|Element|Nheko",
+        "type": "regex"
+      },
+      "data": {}
+    },
+    {
+      "id": 77,
+      "name": ["ALL", "Browser", "Comms", "Email"],
+      "rule": { "regex": "Gmail|Thunderbird|mutt|alpine", "type": "regex" },
+      "data": {}
+    }
+  ]
+}
