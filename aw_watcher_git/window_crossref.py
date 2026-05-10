@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -36,6 +37,8 @@ def _find_claude_code_cwds() -> list[str]:
     reads /proc/<pid>/cmdline to find processes containing "claude" in argv[0],
     then reads /proc/<pid>/cwd to get their working directory.
     """
+    if sys.platform != "linux":
+        return []
     cwds = []
     try:
         for entry in os.listdir("/proc"):
