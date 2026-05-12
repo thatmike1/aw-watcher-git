@@ -10,6 +10,7 @@ from pathlib import Path
 logger = logging.getLogger("aw-watcher-git")
 
 DEV_APPS: set[str] = {
+    # linux (X11 WM_CLASS / wayland app_id)
     "dev.warp.Warp",
     "Cursor",
     "cursor",
@@ -21,6 +22,10 @@ DEV_APPS: set[str] = {
     "org.wezfurlong.wezterm",
     "Gedit",
     "gedit",
+    # windows (executable names after .exe stripping)
+    "WindowsTerminal",
+    "powershell",
+    "cmd",
 }
 
 _CURSOR_PROJECT_RE = re.compile(r" - (.+) - Cursor$")
@@ -181,6 +186,8 @@ class WindowCrossReferencer:
 
         data = window_events[0].data
         app = data.get("app", "")
+        if app.endswith(".exe"):
+            app = app[:-4]
         title = data.get("title", "")
 
         repo = self._extract_repo(app, title)
@@ -255,7 +262,7 @@ class WindowCrossReferencer:
                 return repo
 
         # browser: low-confidence word-boundary match
-        if app in ("firefox", "Google-chrome", "chromium", "brave"):
+        if app in ("firefox", "Google-chrome", "chromium", "brave", "chrome", "msedge"):
             repo = self._parse_browser_title(title)
             if repo:
                 return repo
