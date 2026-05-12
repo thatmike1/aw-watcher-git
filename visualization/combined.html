@@ -257,6 +257,34 @@
       return { kind: 'other', label: app || '(other)' };
     }
 
+    function extractProject(app, title) {
+      app = (app || '').toLowerCase();
+      title = title || '';
+      if (app.includes('cursor')) {
+        let parts = title.split(' — ');
+        if (parts.length >= 2) {
+          const last = parts[parts.length - 1].replace(/\s*[-–—]\s*Cursor$/i, '').trim();
+          if (last) return last;
+        }
+        parts = title.split(' - ');
+        const filtered = parts.map(p => p.trim()).filter(p => p.toLowerCase() !== 'cursor');
+        if (filtered.length >= 2) return filtered[filtered.length - 1];
+        return null;
+      }
+      if (app === 'code' || app.includes('vscode')) {
+        const parts = title.split(' - ');
+        if (parts.length >= 3) return parts[parts.length - 2].trim();
+        return null;
+      }
+      if (app.includes('warp') || app.includes('ghostty') || app.includes('kitty') ||
+          app.includes('alacritty') || app.includes('wezterm')) {
+        const m = title.match(/(?:~\/git\/|\/git\/)([\w.-]+)/);
+        if (m) return m[1];
+        return null;
+      }
+      return null;
+    }
+
     /* ------------------------------------------------------------------ */
     /*  build a per-second timeline of window events                        */
     /*  used for fast lookup of "what app was active at time T"            */
@@ -418,6 +446,7 @@
         .map(ev => ({
           start: new Date(ev.timestamp).getTime(),
           end: new Date(ev.timestamp).getTime() + (ev.duration || 0) * 1000,
+          repo: ev.data?.repo || 'unknown',
         }))
         .sort((a, b) => a.start - b.start);
 
@@ -440,6 +469,27 @@
         return false;
       }
 
+      function findGitRepoAt(ts, durSec) {
+        const evEnd = ts + durSec * 1000;
+        let lo = 0, hi = gitIdx.length - 1, best = -1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (gitIdx[mid].start <= evEnd) { best = mid; lo = mid + 1; }
+          else { hi = mid - 1; }
+        }
+        const repos = {};
+        for (let i = best; i >= 0 && i >= best - 20; i--) {
+          const g = gitIdx[i];
+          if (g.end < ts) continue;
+          if (g.start <= evEnd && g.end >= ts) {
+            repos[g.repo] = (repos[g.repo] || 0) + 1;
+          }
+        }
+        const entries = Object.entries(repos);
+        if (!entries.length) return null;
+        return entries.sort((a, b) => b[1] - a[1])[0][0];
+      }
+
       /* --- classify all window events, AFK-filtered --- */
       const workTotals = {};
       let workTotal = 0;
@@ -447,18 +497,29 @@
       let ambiguousTotal = 0;
       let otherTotal = 0;
       let afkTotal = 0;
+
+      function addWork(label, dur, project) {
+        if (!workTotals[label]) workTotals[label] = { total: 0, projects: {} };
+        workTotals[label].total += dur;
+        if (project) {
+          workTotals[label].projects[project] = (workTotals[label].projects[project] || 0) + dur;
+        }
+      }
+
       for (const ev of winEvents) {
         const dur = ev.duration || 0;
         const ts = new Date(ev.timestamp).getTime();
         if (isAfkAt(afkIdx, ts)) { afkTotal += dur; continue; }
         const c = classify(ev.data?.app, ev.data?.title);
+        const project = extractProject(ev.data?.app, ev.data?.title)
+                     || findGitRepoAt(ts, dur);
         if (c.kind === 'work') {
-          workTotals[c.label] = (workTotals[c.label] || 0) + dur;
+          addWork(c.label, dur, project);
           workTotal += dur;
         } else if (c.kind === 'ambiguous') {
-          // claude code: only count as work if there's a concurrent git heartbeat
           if (hasGitOverlap(ts, dur)) {
-            workTotals['Claude Code (work)'] = (workTotals['Claude Code (work)'] || 0) + dur;
+            const repo = findGitRepoAt(ts, dur);
+            addWork('Claude Code (work)', dur, repo);
             workTotal += dur;
           } else {
             ambiguousTotal += dur;
@@ -470,9 +531,15 @@
         }
       }
 
-      const workRows = Object.entries(workTotals)
-        .sort((a, b) => b[1] - a[1])
-        .map(([label, dur]) => ({ level: 0, name: label, duration: dur }));
+      const workRows = [];
+      const sorted = Object.entries(workTotals).sort((a, b) => b[1].total - a[1].total);
+      for (const [label, data] of sorted) {
+        workRows.push({ level: 0, name: label, duration: data.total });
+        const projects = Object.entries(data.projects).sort((a, b) => b[1] - a[1]);
+        for (const [proj, dur] of projects) {
+          workRows.push({ level: 1, name: proj, duration: dur });
+        }
+      }
       renderTree(document.getElementById('workTree'), workRows);
 
       /* --- hero --- */
