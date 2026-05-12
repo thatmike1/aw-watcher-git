@@ -146,7 +146,8 @@ class GitActivityWatcher:
         """start the watcher - blocks until shutdown."""
         self._running = True
         signal.signal(signal.SIGINT, self._handle_signal)
-        signal.signal(signal.SIGTERM, self._handle_signal)
+        if sys.platform != "win32":
+            signal.signal(signal.SIGTERM, self._handle_signal)
 
         # wait for AW server
         logger.info("waiting for ActivityWatch server...")
