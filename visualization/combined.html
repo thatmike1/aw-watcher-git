@@ -141,6 +141,18 @@
     .loading { color: var(--text-muted); padding: 10px 0; }
 
     .legend { font-size: 0.7rem; color: var(--text-dim); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+
+    .hero-breakdown {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      text-align: left;
+      max-width: 420px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .hero-breakdown .tree-row.lvl-0 { padding-top: 3px; }
+    .hero-breakdown .tree-row.lvl-0:first-child { padding-top: 0; }
   </style>
 </head>
 <body>
@@ -155,6 +167,7 @@
       <div class="hero-label">time worked</div>
       <div class="hero-time" id="heroTime">--</div>
       <div class="hero-sub" id="heroSub">loading...</div>
+      <div class="tree hero-breakdown" id="heroBreakdown"></div>
     </div>
 
     <div class="summary" id="summary"></div>
@@ -245,6 +258,9 @@
       if (app === 'zed') return { kind: 'work', label: 'Zed' };
       if (app.includes('obsidian')) return { kind: 'work', label: 'Obsidian' };
 
+      // chrome devtools (exact match before browser block to avoid personal filter)
+      if (app === 'google-chrome') return { kind: 'work', label: 'Chrome DevTools' };
+
       // browsers: split by title — personal patterns → personal, else work
       if (app.includes('firefox') || app.includes('chrome') || app.includes('chromium') || app.includes('brave')) {
         for (const re of PERSONAL_PATTERNS) {
@@ -252,6 +268,11 @@
         }
         return { kind: 'work', label: 'Browser (work)' };
       }
+
+      if (app === 'emulator') return { kind: 'work', label: 'Emulator' };
+      if (app === 'reactotron') return { kind: 'work', label: 'Reactotron' };
+      if (app === 'capacities') return { kind: 'work', label: 'Capacities' };
+      if (app.includes('qemu-system')) return { kind: 'work', label: 'QEMU VM' };
 
       // anything else: don't count
       return { kind: 'other', label: app || '(other)' };
@@ -281,6 +302,35 @@
         const m = title.match(/(?:~\/git\/|\/git\/)([\w.-]+)/);
         if (m) return m[1];
         return null;
+      }
+      if (app === 'google-chrome') {
+        const m = title.match(/^([\w.-]+)\s*\(/);
+        if (m) return m[1];
+        return null;
+      }
+      return null;
+    }
+
+    const PROJECT_PATTERNS = [
+      { re: /pracino/i, repo: 'pracino' },
+      { re: /cez\.atreo\.cz|esco\.cz|vose\.cz|ČEZ ESCO|cez-ems|EMS Portal/i, repo: 'cez' },
+      { re: /najdizaskok/i, repo: 'najdizaskok-fe' },
+      { re: /3D Plánovač|B2B Partner|B2B-Büroplaner|B2B Administrace|localhost:8888/i, repo: 'b2b-3d-planner' },
+      { re: /forum\.babylonjs\.com|playground\.babylonjs\.com/i, repo: 'b2b-3d-planner' },
+      { re: /Metrie - konfigurátor|partner\.loc|Detail Objednávky/i, repo: 'metrie' },
+      { re: /ccChat/i, repo: 'ccChat-general' },
+    ];
+
+    function extractGitLabProject(title) {
+      const m = title.match(/atreo\s*\/\s*([^·]+?)(?:\s*·\s*GitLab)/i);
+      if (!m) return null;
+      const parts = m[1].trim().split(/\s*\/\s*/);
+      return parts[parts.length - 1].trim().toLowerCase() || null;
+    }
+
+    function matchProjectPattern(title) {
+      for (const { re, repo } of PROJECT_PATTERNS) {
+        if (re.test(title)) return repo;
       }
       return null;
     }
@@ -348,6 +398,21 @@
       const a = afkIdx[best];
       if (ts <= a.end) return a.status === 'afk';
       return false;
+    }
+
+    function getAfkInfo(afkIdx, ts) {
+      let lo = 0, hi = afkIdx.length - 1, best = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (afkIdx[mid].start <= ts) { best = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+      }
+      if (best === -1) return { isAfk: false, duration: 0 };
+      const a = afkIdx[best];
+      if (ts <= a.end && a.status === 'afk') {
+        return { isAfk: true, duration: (a.end - a.start) / 1000 };
+      }
+      return { isAfk: false, duration: 0 };
     }
 
     /* ------------------------------------------------------------------ */
@@ -447,6 +512,7 @@
           start: new Date(ev.timestamp).getTime(),
           end: new Date(ev.timestamp).getTime() + (ev.duration || 0) * 1000,
           repo: ev.data?.repo || 'unknown',
+          branch: ev.data?.branch || 'unknown',
         }))
         .sort((a, b) => a.start - b.start);
 
@@ -469,7 +535,7 @@
         return false;
       }
 
-      function findGitRepoAt(ts, durSec) {
+      function findGitInfoAt(ts, durSec) {
         const evEnd = ts + durSec * 1000;
         let lo = 0, hi = gitIdx.length - 1, best = -1;
         while (lo <= hi) {
@@ -477,26 +543,80 @@
           if (gitIdx[mid].start <= evEnd) { best = mid; lo = mid + 1; }
           else { hi = mid - 1; }
         }
-        const repos = {};
+        const hits = {};
         for (let i = best; i >= 0 && i >= best - 20; i--) {
           const g = gitIdx[i];
           if (g.end < ts) continue;
           if (g.start <= evEnd && g.end >= ts) {
-            repos[g.repo] = (repos[g.repo] || 0) + 1;
+            const key = g.repo + '\0' + g.branch;
+            hits[key] = (hits[key] || 0) + 1;
           }
         }
-        const entries = Object.entries(repos);
+        const entries = Object.entries(hits);
         if (!entries.length) return null;
-        return entries.sort((a, b) => b[1] - a[1])[0][0];
+        const [bestKey] = entries.sort((a, b) => b[1] - a[1])[0];
+        const [repo, branch] = bestKey.split('\0');
+        return { repo, branch };
+      }
+
+      function findGitRepoAt(ts, durSec) {
+        return findGitInfoAt(ts, durSec)?.repo || null;
+      }
+
+      function matchBranchInTitle(title) {
+        if (!matchBranchInTitle._branches) {
+          const map = {};
+          for (const g of gitIdx) {
+            if (g.branch && g.branch !== 'unknown' && g.branch.length >= 8) {
+              map[g.branch] = g.repo;
+            }
+          }
+          matchBranchInTitle._branches = Object.entries(map);
+        }
+        const lower = title.toLowerCase();
+        for (const [branch, repo] of matchBranchInTitle._branches) {
+          if (lower.includes(branch.toLowerCase())) {
+            return { repo, branch };
+          }
+        }
+        return null;
+      }
+
+      function findNearestGitInfo(ts, durSec, maxDistMs) {
+        if (!maxDistMs) maxDistMs = 15 * 60 * 1000;
+        const evMid = ts + (durSec * 1000) / 2;
+        let lo = 0, hi = gitIdx.length - 1, insertAt = -1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (gitIdx[mid].start <= evMid) { insertAt = mid; lo = mid + 1; }
+          else { hi = mid - 1; }
+        }
+        let bestDist = Infinity, bestInfo = null;
+        for (let dir = -1; dir <= 1; dir += 2) {
+          const start = dir === -1 ? insertAt : insertAt + 1;
+          for (let i = start; i >= 0 && i < gitIdx.length; i += dir) {
+            const g = gitIdx[i];
+            const gMid = (g.start + g.end) / 2;
+            const dist = Math.abs(evMid - gMid);
+            if (dist > maxDistMs) break;
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestInfo = { repo: g.repo, branch: g.branch };
+            }
+          }
+        }
+        return bestInfo;
       }
 
       /* --- classify all window events, AFK-filtered --- */
       const workTotals = {};
+      const projectBranchTotals = {};
       let workTotal = 0;
       let personalTotal = 0;
       let ambiguousTotal = 0;
       let otherTotal = 0;
       let afkTotal = 0;
+      let afkRecoveredTotal = 0;
 
       function addWork(label, dur, project) {
         if (!workTotals[label]) workTotals[label] = { total: 0, projects: {} };
@@ -506,20 +626,59 @@
         }
       }
 
+      function addProjectBranch(gitInfo, dur) {
+        if (!gitInfo) return;
+        const { repo, branch } = gitInfo;
+        if (!projectBranchTotals[repo]) projectBranchTotals[repo] = { total: 0, branches: {} };
+        projectBranchTotals[repo].total += dur;
+        if (branch) {
+          projectBranchTotals[repo].branches[branch] =
+            (projectBranchTotals[repo].branches[branch] || 0) + dur;
+        }
+      }
+
       for (const ev of winEvents) {
         const dur = ev.duration || 0;
         const ts = new Date(ev.timestamp).getTime();
-        if (isAfkAt(afkIdx, ts)) { afkTotal += dur; continue; }
+        const afkState = getAfkInfo(afkIdx, ts);
+        if (afkState.isAfk) {
+          if (afkState.duration <= 300) {
+            afkRecoveredTotal += dur;
+          } else {
+            afkTotal += dur;
+            continue;
+          }
+        }
         const c = classify(ev.data?.app, ev.data?.title);
-        const project = extractProject(ev.data?.app, ev.data?.title)
-                     || findGitRepoAt(ts, dur);
+        const appRaw = ev.data?.app || '';
+        const titleRaw = ev.data?.title || '';
+
+        let project = extractProject(appRaw, titleRaw);
+        if (!project) project = extractGitLabProject(titleRaw);
+        if (!project) project = matchProjectPattern(titleRaw);
+        let branchMatch = null;
+        if (!project) {
+          branchMatch = matchBranchInTitle(titleRaw);
+          if (branchMatch) project = branchMatch.repo;
+        }
+        const gitInfo = findGitInfoAt(ts, dur);
+        if (!project && gitInfo) project = gitInfo.repo;
+        let nearGitInfo = null;
+        if (!project) {
+          nearGitInfo = findNearestGitInfo(ts, dur);
+          if (nearGitInfo) project = nearGitInfo.repo;
+        }
+        const bestGitInfo = gitInfo || branchMatch || nearGitInfo
+          || (project ? { repo: project, branch: null } : null);
+
         if (c.kind === 'work') {
           addWork(c.label, dur, project);
+          addProjectBranch(bestGitInfo, dur);
           workTotal += dur;
         } else if (c.kind === 'ambiguous') {
-          if (hasGitOverlap(ts, dur)) {
-            const repo = findGitRepoAt(ts, dur);
-            addWork('Claude Code (work)', dur, repo);
+          if (hasGitOverlap(ts, dur) || nearGitInfo) {
+            addWork('Claude Code (work)', dur, bestGitInfo?.repo || null);
+            addProjectBranch(bestGitInfo, dur);
             workTotal += dur;
           } else {
             ambiguousTotal += dur;
@@ -532,8 +691,8 @@
       }
 
       const workRows = [];
-      const sorted = Object.entries(workTotals).sort((a, b) => b[1].total - a[1].total);
-      for (const [label, data] of sorted) {
+      const sortedWork = Object.entries(workTotals).sort((a, b) => b[1].total - a[1].total);
+      for (const [label, data] of sortedWork) {
         workRows.push({ level: 0, name: label, duration: data.total });
         const projects = Object.entries(data.projects).sort((a, b) => b[1] - a[1]);
         for (const [proj, dur] of projects) {
@@ -542,9 +701,27 @@
       }
       renderTree(document.getElementById('workTree'), workRows);
 
+      /* --- hero project/branch breakdown --- */
+      const heroRows = [];
+      const sortedProjects = Object.entries(projectBranchTotals).sort((a, b) => b[1].total - a[1].total);
+      for (const [repo, data] of sortedProjects) {
+        heroRows.push({ level: 0, name: repo, duration: data.total });
+        const branches = Object.entries(data.branches).sort((a, b) => b[1] - a[1]);
+        for (const [branch, dur] of branches) {
+          heroRows.push({ level: 1, name: branch, duration: dur });
+        }
+      }
+      const attributed = sortedProjects.reduce((s, [, d]) => s + d.total, 0);
+      const unattributed = workTotal - attributed;
+      if (unattributed > 30) {
+        heroRows.push({ level: 0, name: '(unattributed)', duration: unattributed });
+      }
+      renderTree(document.getElementById('heroBreakdown'), heroRows);
+
       /* --- hero --- */
       document.getElementById('heroTime').textContent = fmtDur(workTotal);
       const parts = [`non-afk time in dev tools and work browser tabs`];
+      if (afkRecoveredTotal > 0) parts.push(`recovered (short afk): ${fmtDur(afkRecoveredTotal)}`);
       if (ambiguousTotal > 0) parts.push(`claude code (unconfirmed): ${fmtDur(ambiguousTotal)}`);
       if (personalTotal > 0) parts.push(`personal: ${fmtDur(personalTotal)}`);
       parts.push(`afk: ${fmtDur(afkTotal)}`);
@@ -560,6 +737,10 @@
         <div class="stat">
           <div class="stat-label">git tracked</div>
           <div class="stat-value blue">${fmtDur(gitTotal)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">recovered (short afk)</div>
+          <div class="stat-value green">${fmtDur(afkRecoveredTotal)}</div>
         </div>
         <div class="stat">
           <div class="stat-label">cc (unconfirmed)</div>
