@@ -160,6 +160,20 @@ class WindowCrossReferencer:
                 "loaded %d aliases from warp launch configs", len(auto_aliases)
             )
 
+    def is_afk(self) -> bool:
+        """return True if the latest afk-watcher event reports the user is afk.
+
+        used to gate the git-status polling phase, which has no window
+        signal of its own. returns False on any query failure so a missing
+        afk watcher never blocks tracking.
+        """
+        try:
+            afk_events = self._client.get_events(self._afk_bucket, limit=1)
+            return bool(afk_events) and afk_events[0].data.get("status") == "afk"
+        except Exception:
+            logger.debug("failed to query afk bucket", exc_info=True)
+            return False
+
     def get_active_repo(self, afk_aware: bool = True) -> str | None:
         """return the repo name if the user is actively working on a tracked repo, else None.
 

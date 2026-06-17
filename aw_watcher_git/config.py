@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = {
     "directories": ["~/git"],
     "poll_time": 10.0,
-    "pulsetime": 300.0,
+    "pulsetime": 120.0,
     "ignore_dirs": [
         ".git",
         "node_modules",
@@ -35,6 +35,7 @@ DEFAULT_CONFIG = {
     ],
     "window_crossref": True,
     "afk_aware": True,
+    "suppress_on_call": True,
     "git_status_interval": 60.0,
     "repo_aliases": {},
     "personal_repos": [],

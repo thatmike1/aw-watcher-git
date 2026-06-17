@@ -315,6 +315,13 @@
       cursor: default;
     }
     .timeline-block:hover { opacity: 1; }
+    .timeline-block.afk-block {
+      background: repeating-linear-gradient(45deg,
+        rgba(136,146,164,0.30) 0, rgba(136,146,164,0.30) 4px,
+        rgba(136,146,164,0.10) 4px, rgba(136,146,164,0.10) 8px);
+      opacity: 0.9;
+    }
+    .timeline-row.afk-row .timeline-label { color: var(--text-dim); font-style: italic; }
     .timeline-axis {
       display: flex;
       margin-top: 4px;
@@ -594,13 +601,10 @@
     /* ------------------------------------------------------------------ */
     /*  data fetching                                                      */
     /* ------------------------------------------------------------------ */
-    async function fetchEvents() {
-      const { hostname, start, end } = params();
-      const bucketId = `aw-watcher-git_${hostname}`;
+    function resolveBaseUrl() {
       const origin = window.location.origin !== 'null'
         ? window.location.origin
         : `${window.location.protocol}//${window.location.host}`;
-
       /* try parent origin first (iframe scenario) */
       let baseUrl = '';
       try {
@@ -608,9 +612,12 @@
           baseUrl = window.parent.location.origin;
         }
       } catch (_) { /* cross-origin, fall through */ }
-      if (!baseUrl) baseUrl = origin;
+      return baseUrl || origin;
+    }
 
-      const url = new URL(`/api/0/buckets/${encodeURIComponent(bucketId)}/events`, baseUrl);
+    async function fetchBucketEvents(bucketId) {
+      const { start, end } = params();
+      const url = new URL(`/api/0/buckets/${encodeURIComponent(bucketId)}/events`, resolveBaseUrl());
       if (start) url.searchParams.set('start', start);
       if (end)   url.searchParams.set('end', end);
       url.searchParams.set('limit', '-1');
@@ -618,6 +625,17 @@
       const res = await fetch(url.toString());
       if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
       return res.json();
+    }
+
+    async function fetchEvents() {
+      const { hostname } = params();
+      return fetchBucketEvents(`aw-watcher-git_${hostname}`);
+    }
+
+    /* afk bucket is best-effort: missing/unreachable afk watcher must not break the page */
+    async function fetchAfkEvents() {
+      const { hostname } = params();
+      return fetchBucketEvents(`aw-watcher-afk_${hostname}`).catch(() => []);
     }
 
     /* ------------------------------------------------------------------ */
@@ -1078,6 +1096,29 @@
       const container = document.getElementById('timelineContainer');
 
       let html = '';
+
+      /* afk overlay row: shows when the afk watcher marked you away/idle,
+         so leaked git time over a break is visible at a glance. not
+         repo-specific, so it renders regardless of the repo filter. */
+      const afkSpans = (data.afkEvents || []).filter(e => (e.data || {}).status === 'afk');
+      if (afkSpans.length) {
+        html += `<div class="timeline-row afk-row">`;
+        html += `<div class="timeline-label" title="away / idle (afk watcher)">💤 afk</div>`;
+        html += `<div class="timeline-track">`;
+        for (const ev of afkSpans) {
+          const start = new Date(ev.timestamp).getTime();
+          const end = start + (ev.duration || 0) * 1000;
+          const cs = Math.max(start, minTime);
+          const ce = Math.min(end, maxTime);
+          if (ce <= cs) continue;  // outside the visible range
+          const left = ((cs - minTime) / range) * 100;
+          const width = Math.max(((ce - cs) / range) * 100, 0.3);
+          const tipText = `afk (away / idle)<br>${fmtTime(ev.timestamp)} - ${fmtDuration(ev.duration || 0)}`;
+          html += `<div class="timeline-block afk-block" style="left:${left}%;width:${width}%;" data-tip="${tipText.replace(/"/g, '&quot;')}"></div>`;
+        }
+        html += `</div></div>`;
+      }
+
       for (const row of rows) {
         const label = `${row.repo}/${row.branch}`;
         html += `<div class="timeline-row">`;
@@ -1218,6 +1259,7 @@
         }
 
         const data = aggregate(rawEvents);
+        data.afkEvents = await fetchAfkEvents();
 
         /* show panels */
         document.getElementById('panel-summary').style.display = '';
