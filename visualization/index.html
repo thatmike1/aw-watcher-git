@@ -694,6 +694,48 @@
     }
 
     /* ------------------------------------------------------------------ */
+    /*  afk subtraction                                                    */
+    /* ------------------------------------------------------------------ */
+    /* merge afk "away" spans into non-overlapping [start,end] ms intervals.
+       the afk bucket can contain duplicate/overlapping events, so a naive
+       sum double-counts; merging first keeps the subtraction honest. */
+    function mergedAfkIntervals(afkEvents) {
+      const spans = (afkEvents || [])
+        .filter(e => (e.data || {}).status === 'afk')
+        .map(e => {
+          const s = new Date(e.timestamp).getTime();
+          return [s, s + (e.duration || 0) * 1000];
+        })
+        .filter(([s, e]) => e > s)
+        .sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      for (const [s, e] of spans) {
+        const last = merged[merged.length - 1];
+        if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+        else merged.push([s, e]);
+      }
+      return merged;
+    }
+
+    /* seconds of git event time that fall inside afk (away) spans — the
+       idle/away time the watcher logged while you were not actually working. */
+    function afkOverlapSeconds(events, afkIntervals) {
+      if (!afkIntervals.length) return 0;
+      let overlapMs = 0;
+      for (const ev of events) {
+        const s = new Date(ev.timestamp).getTime();
+        const e = s + (ev.duration || 0) * 1000;
+        if (e <= s) continue;
+        for (const [as, ae] of afkIntervals) {
+          if (ae <= s) continue;
+          if (as >= e) break;  // intervals sorted: no later one can overlap
+          overlapMs += Math.min(e, ae) - Math.max(s, as);
+        }
+      }
+      return overlapMs / 1000;
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  chart default config                                               */
     /* ------------------------------------------------------------------ */
     Chart.defaults.color = '#8892a4';
@@ -729,9 +771,15 @@
       const topRepo = Object.entries(data.byRepo).sort((a,b) => b[1]-a[1])[0];
       const topBranch = data.byBranch.sort((a,b) => b.duration-a.duration)[0];
 
-      /* hero time + counts */
+      /* hero time + counts — headline is active (afk-subtracted) time */
+      const heroDuration = data.activeDuration ?? data.totalDuration;
+      const afkAway = data.afkOverlap || 0;
+      const heroSub = afkAway > 0
+        ? `active &middot; ${fmtDuration(afkAway)} away excluded of ${fmtDuration(data.totalDuration)} logged`
+        : `active &middot; ${fmtDuration(data.totalDuration)} logged`;
       document.getElementById('summaryTop').innerHTML = `
-        <div class="hero-time">${fmtDuration(data.totalDuration)}</div>
+        <div class="hero-time">${fmtDuration(heroDuration)}</div>
+        <div style="color:var(--text-dim);font-size:0.82rem;margin-top:2px;">${heroSub}</div>
         <div class="counts">
           <div class="count-item"><span class="num">${data.repoCount}</span><span class="what">repos</span></div>
           <div class="count-item"><span class="num">${data.branchCount}</span><span class="what">branches</span></div>
@@ -1260,6 +1308,13 @@
 
         const data = aggregate(rawEvents);
         data.afkEvents = await fetchAfkEvents();
+
+        /* the git watcher logs inferred heartbeats that bleed into away time;
+           subtract the portion overlapping afk spans so the headline number
+           reflects actual active work, not "awake with an editor open". */
+        const afkIntervals = mergedAfkIntervals(data.afkEvents);
+        data.afkOverlap = afkOverlapSeconds(rawEvents, afkIntervals);
+        data.activeDuration = Math.max(data.totalDuration - data.afkOverlap, 0);
 
         /* show panels */
         document.getElementById('panel-summary').style.display = '';

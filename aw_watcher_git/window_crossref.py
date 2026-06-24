@@ -33,6 +33,14 @@ _CURSOR_PROJECT_RE = re.compile(r" - (.+) - Cursor$")
 _WARP_CWD_RE = re.compile(r"(?:~/git|/[^/\s]+/git)/([^/\s]+)")
 # warp shows "✳ Claude Code" or "✳ <conversation-name>" when claude code is active
 _WARP_CLAUDE_CODE_RE = re.compile(r"^✳\s")
+# non-work browser contexts (chat / calls / mail) whose titles often carry a
+# repo name as a channel/topic — e.g. "Pracino - atreo Mattermost" — and would
+# otherwise get billed to that repo. skip browser matching when present.
+_NON_WORK_BROWSER_RE = re.compile(
+    r"mattermost|slack|google meet|microsoft teams|\bzoom\b|gmail|"
+    r"outlook|discord|whatsapp|telegram|calendar",
+    re.IGNORECASE,
+)
 _WARP_LAUNCH_DIR = Path.home() / ".local" / "share" / "warp-terminal" / "launch_configurations"
 
 
@@ -174,12 +182,16 @@ class WindowCrossReferencer:
             logger.debug("failed to query afk bucket", exc_info=True)
             return False
 
-    def get_active_repo(self, afk_aware: bool = True) -> str | None:
+    def get_active_repo(
+        self, afk_aware: bool = True, recent_repos: set[str] | None = None
+    ) -> str | None:
         """return the repo name if the user is actively working on a tracked repo, else None.
 
         queries the window watcher for the current window and optionally
         checks afk status before attempting to extract a repo name from
-        the window title.
+        the window title. ``recent_repos``, when given, restricts the
+        claude-code /proc fallback to repos with recent real file activity
+        (the title-based paths are unaffected).
         """
         if afk_aware:
             try:
@@ -212,8 +224,16 @@ class WindowCrossReferencer:
         # scan /proc for running claude processes and match their CWD against watched repos
         if app == "dev.warp.Warp" and _WARP_CLAUDE_CODE_RE.search(title):
             repo = self._detect_claude_code_repo()
-            if repo:
+            # the /proc scan can't tell which warp pane is focused, so a
+            # background claude session in a watched repo would otherwise be
+            # billed on any focused ✳ tab. only trust it when that repo had
+            # recent real file activity (gated by the caller).
+            if repo and (recent_repos is None or repo in recent_repos):
                 return repo
+            if repo:
+                logger.debug(
+                    "claude code repo %s suppressed: no recent file activity", repo
+                )
 
         return None
 
@@ -340,6 +360,10 @@ class WindowCrossReferencer:
         low confidence - only matches if a watched repo name appears as
         a distinct word in the title.
         """
+        # chat/call/mail tabs frequently embed a repo name as a topic; don't
+        # bill that reading time to the repo.
+        if _NON_WORK_BROWSER_RE.search(title):
+            return None
         title_lower = title.lower()
         for repo_lower, repo_name in self._watched_repos_lower.items():
             # skip very short names to avoid false positives

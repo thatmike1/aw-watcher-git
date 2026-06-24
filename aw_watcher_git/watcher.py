@@ -292,14 +292,28 @@ class GitActivityWatcher:
                 # phase 2: window cross-referencing
                 if crossref is not None and not suppress_inferred:
                     try:
-                        # afk already handled above; avoid a duplicate bucket query
-                        window_repo = crossref.get_active_repo(afk_aware=False)
+                        # afk already handled above; avoid a duplicate bucket query.
+                        # pass repos with recent *real* file activity so the /proc
+                        # claude-code fallback only attributes to a repo you've
+                        # actually been editing — a background claude session in a
+                        # watched repo no longer gets billed on any focused ✳ tab.
+                        recent_fs_repos = {
+                            r
+                            for r, t in recent_active_repos.items()
+                            if now_ts - t <= 300
+                        }
+                        window_repo = crossref.get_active_repo(
+                            afk_aware=False, recent_repos=recent_fs_repos
+                        )
                         if window_repo and window_repo not in fs_repo_names:
                             repo_path = repo_paths.get(window_repo)
                             if repo_path:
                                 branch = get_branch(repo_path)
                                 event_data = {"repo": window_repo, "branch": branch}
-                                recent_active_repos[window_repo] = now_ts
+                                # do NOT refresh recent_active_repos here: inferred
+                                # window activity must not sustain phase 3 git-status
+                                # polling, or phases 2 & 3 keep each other alive with
+                                # no real edits (unbounded inferred over-count).
                                 event = Event(timestamp=now, data=event_data)
                                 self._client.heartbeat(
                                     self._bucket_id,
