@@ -36,9 +36,22 @@ DEFAULT_CONFIG = {
     "window_crossref": True,
     "afk_aware": True,
     "suppress_on_call": True,
-    "git_status_interval": 60.0,
     "repo_aliases": {},
     "personal_repos": [],
+    # attribute one repo's fs activity to another, e.g. a VM or build-output
+    # checkout that is really part of work on the target repo:
+    # [aw-watcher-git.repo_map] \n OSX-KVM = "pracino"
+    "repo_map": {},
+    # process names counted as coding agents for /proc cpu-activity detection
+    "agent_process_names": ["claude", "codex", "opencode"],
+    # not-afk event end older than this (seconds) counts as idle (input stopped)
+    "idle_stale_seconds": 60.0,
+    # keep attributing the current repo this long after its last direct signal
+    "tail_seconds": 300.0,
+    # fs activity keeps a repo eligible for attribution this long (seconds)
+    "fs_signal_window": 60.0,
+    # how often to rescan configured directories for newly cloned repos
+    "rescan_interval": 300.0,
 }
 
 

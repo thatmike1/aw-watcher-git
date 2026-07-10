@@ -3,8 +3,8 @@
 import logging
 import os
 import re
-import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("aw-watcher-git")
@@ -31,8 +31,6 @@ DEV_APPS: set[str] = {
 _CURSOR_PROJECT_RE = re.compile(r" - (.+) - Cursor$")
 # matches ~/git/repo or /home/user/git/repo (handles both tilde and full path)
 _WARP_CWD_RE = re.compile(r"(?:~/git|/[^/\s]+/git)/([^/\s]+)")
-# warp shows "✳ Claude Code" or "✳ <conversation-name>" when claude code is active
-_WARP_CLAUDE_CODE_RE = re.compile(r"^✳\s")
 # non-work browser contexts (chat / calls / mail) whose titles often carry a
 # repo name as a channel/topic — e.g. "Pracino - atreo Mattermost" — and would
 # otherwise get billed to that repo. skip browser matching when present.
@@ -43,37 +41,13 @@ _NON_WORK_BROWSER_RE = re.compile(
 )
 _WARP_LAUNCH_DIR = Path.home() / ".local" / "share" / "warp-terminal" / "launch_configurations"
 
+# repo names shorter than this never substring-match window titles; short
+# names ("app", "web") appear in too many unrelated titles
+_MIN_SUBSTRING_LEN = 4
 
-def _find_claude_code_cwds() -> list[str]:
-    """scan /proc for running claude code processes and return their working directories.
-
-    reads /proc/<pid>/cmdline to find processes containing "claude" in argv[0],
-    then reads /proc/<pid>/cwd to get their working directory.
-    """
-    if sys.platform != "linux":
-        return []
-    cwds = []
-    try:
-        for entry in os.listdir("/proc"):
-            if not entry.isdigit():
-                continue
-            pid = entry
-            try:
-                with open(f"/proc/{pid}/cmdline", "rb") as f:
-                    cmdline = f.read()
-                # cmdline is null-separated, argv[0] is the executable
-                argv0 = cmdline.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
-                # match "claude" binary (could be /home/user/.claude/local/claude or similar)
-                basename = os.path.basename(argv0)
-                if basename != "claude":
-                    continue
-                cwd = os.readlink(f"/proc/{pid}/cwd")
-                cwds.append(cwd)
-            except (OSError, PermissionError, UnicodeDecodeError):
-                continue
-    except OSError:
-        pass
-    return cwds
+# a window event whose end lags now by more than this is treated as stale
+# (aw-watcher-window died or hangs) and yields no attribution
+_WINDOW_STALE_SECONDS = 30.0
 
 
 def _scan_warp_launch_configs() -> dict[str, str]:
@@ -140,23 +114,14 @@ class WindowCrossReferencer:
         hostname: str,
         watched_repos: list[str],
         repo_aliases: dict[str, str],
-        repo_paths: dict[str, str] | None = None,
-        personal_repos: list[str] | None = None,
+        idle_stale_seconds: float = 60.0,
     ) -> None:
         self._client = client
         self._window_bucket = f"aw-watcher-window_{hostname}"
         self._afk_bucket = f"aw-watcher-afk_{hostname}"
         self._watched_repos = set(watched_repos)
         self._watched_repos_lower = {r.lower(): r for r in watched_repos}
-        self._personal_repos = set(personal_repos or [])
-
-        # repo_paths: repo_name -> absolute path (e.g. "cez-ems" -> "/home/user/git/cez-ems")
-        # used to match claude code process CWDs against watched repos
-        self._repo_path_to_name: dict[str, str] = {}
-        if repo_paths:
-            for name, path in repo_paths.items():
-                if name not in self._personal_repos:
-                    self._repo_path_to_name[os.path.realpath(path)] = name
+        self._idle_stale_seconds = idle_stale_seconds
 
         # auto-scan warp launch configs, then overlay explicit config aliases
         auto_aliases = _scan_warp_launch_configs()
@@ -168,39 +133,45 @@ class WindowCrossReferencer:
                 "loaded %d aliases from warp launch configs", len(auto_aliases)
             )
 
-    def is_afk(self) -> bool:
-        """return True if the latest afk-watcher event reports the user is afk.
+    def add_repo(self, repo_name: str) -> None:
+        """register a newly discovered repo for title matching."""
+        self._watched_repos.add(repo_name)
+        self._watched_repos_lower[repo_name.lower()] = repo_name
 
-        used to gate the git-status polling phase, which has no window
-        signal of its own. returns False on any query failure so a missing
-        afk watcher never blocks tracking.
+    def is_idle(self) -> bool:
+        """return True when the user has stopped giving input.
+
+        two conditions count as idle:
+        - the latest afk event reports status "afk", or
+        - the latest not-afk event has gone stale: aw-watcher-afk heartbeats
+          its not-afk event every few seconds, so its end (timestamp+duration)
+          tracks "now" while input continues. the moment input stops, the end
+          stops advancing — staleness detects a break in ~1min instead of
+          waiting ~180s for the afk timeout to flip the status.
+
+        returns False on any query failure so a missing afk watcher never
+        blocks tracking.
         """
         try:
             afk_events = self._client.get_events(self._afk_bucket, limit=1)
-            return bool(afk_events) and afk_events[0].data.get("status") == "afk"
+            if not afk_events:
+                return False
+            event = afk_events[0]
+            if event.data.get("status") == "afk":
+                return True
+            end = event.timestamp + event.duration
+            now = datetime.now(timezone.utc)
+            return (now - end).total_seconds() > self._idle_stale_seconds
         except Exception:
             logger.debug("failed to query afk bucket", exc_info=True)
             return False
 
-    def get_active_repo(
-        self, afk_aware: bool = True, recent_repos: set[str] | None = None
-    ) -> str | None:
-        """return the repo name if the user is actively working on a tracked repo, else None.
+    def get_window_repo(self) -> str | None:
+        """return the repo name the focused window resolves to, else None.
 
-        queries the window watcher for the current window and optionally
-        checks afk status before attempting to extract a repo name from
-        the window title. ``recent_repos``, when given, restricts the
-        claude-code /proc fallback to repos with recent real file activity
-        (the title-based paths are unaffected).
+        stale window events (aw-watcher-window not reporting) yield None so a
+        dead watcher can't keep billing the last-focused repo forever.
         """
-        if afk_aware:
-            try:
-                afk_events = self._client.get_events(self._afk_bucket, limit=1)
-                if afk_events and afk_events[0].data.get("status") == "afk":
-                    return None
-            except Exception:
-                logger.debug("failed to query afk bucket", exc_info=True)
-
         try:
             window_events = self._client.get_events(self._window_bucket, limit=1)
         except Exception:
@@ -210,76 +181,20 @@ class WindowCrossReferencer:
         if not window_events:
             return None
 
-        data = window_events[0].data
+        event = window_events[0]
+        end = event.timestamp + event.duration
+        now = datetime.now(timezone.utc)
+        if (now - end).total_seconds() > _WINDOW_STALE_SECONDS:
+            logger.debug("window bucket stale, ignoring last event")
+            return None
+
+        data = event.data
         app = data.get("app", "")
         if app.endswith(".exe"):
             app = app[:-4]
         title = data.get("title", "")
 
-        repo = self._extract_repo(app, title)
-        if repo:
-            return repo
-
-        # fallback: warp is showing a claude code session (no repo info in title)
-        # scan /proc for running claude processes and match their CWD against watched repos
-        if app == "dev.warp.Warp" and _WARP_CLAUDE_CODE_RE.search(title):
-            repo = self._detect_claude_code_repo()
-            # the /proc scan can't tell which warp pane is focused, so a
-            # background claude session in a watched repo would otherwise be
-            # billed on any focused ✳ tab. only trust it when that repo had
-            # recent real file activity (gated by the caller).
-            if repo and (recent_repos is None or repo in recent_repos):
-                return repo
-            if repo:
-                logger.debug(
-                    "claude code repo %s suppressed: no recent file activity", repo
-                )
-
-        return None
-
-    def _detect_claude_code_repo(self) -> str | None:
-        """detect which watched repo the active claude code session is running in.
-
-        scans /proc for claude processes, reads their CWD, and matches
-        against the watched repo paths. if multiple claude processes are
-        running in watched repos, returns the one that was most recently
-        scheduled (likely the focused pane).
-        """
-        if not self._repo_path_to_name:
-            return None
-
-        cwds = _find_claude_code_cwds()
-        if not cwds:
-            return None
-
-        # match CWDs against watched repo paths (deduplicate by repo name)
-        matched_repos: set[str] = set()
-        for cwd in cwds:
-            real_cwd = os.path.realpath(cwd)
-            repo_name = self._repo_path_to_name.get(real_cwd)
-            if repo_name:
-                matched_repos.add(repo_name)
-
-        if not matched_repos:
-            logger.debug(
-                "claude code detected, %d processes found but none in work repos (cwds: %s)",
-                len(cwds),
-                cwds,
-            )
-            return None
-
-        if len(matched_repos) == 1:
-            repo = next(iter(matched_repos))
-            logger.debug("claude code in work repo: %s", repo)
-            return repo
-
-        # multiple distinct work repos — can't determine which is focused,
-        # so skip to avoid attributing to the wrong repo
-        logger.debug(
-            "claude code detected in multiple work repos: %s — skipping",
-            matched_repos,
-        )
-        return None
+        return self._extract_repo(app, title)
 
     def _extract_repo(self, app: str, title: str) -> str | None:
         """try to extract a repo name from the app and window title."""
@@ -349,6 +264,8 @@ class WindowCrossReferencer:
 
         # substring match: check if any watched repo name appears in the title
         for repo_lower, repo_name in self._watched_repos_lower.items():
+            if len(repo_lower) < _MIN_SUBSTRING_LEN:
+                continue
             if repo_lower in title_lower:
                 return repo_name
 
@@ -367,7 +284,7 @@ class WindowCrossReferencer:
         title_lower = title.lower()
         for repo_lower, repo_name in self._watched_repos_lower.items():
             # skip very short names to avoid false positives
-            if len(repo_lower) < 4:
+            if len(repo_lower) < _MIN_SUBSTRING_LEN:
                 continue
             pattern = r"\b" + re.escape(repo_lower) + r"\b"
             if re.search(pattern, title_lower):

@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_repo_root_cache: dict[str, str | None] = {}
+_repo_root_cache: dict[str, str] = {}
 _branch_cache: dict[str, str] = {}
 
 
@@ -28,7 +28,7 @@ def find_git_repos(directory: str) -> list[str]:
 
 
 def get_repo_root(file_path: str) -> str | None:
-    """given a file path, find the git repo root it belongs to. results are cached."""
+    """given a file path, find the git repo root it belongs to. roots are cached."""
     path = Path(file_path).resolve()
 
     for parent in [path] + list(path.parents):
@@ -41,12 +41,22 @@ def get_repo_root(file_path: str) -> str | None:
             _repo_root_cache[parent_str] = parent_str
             return parent_str
 
-    _repo_root_cache[str(path)] = None
+    # negative results are not cached: watched paths almost always resolve to a
+    # repo, and caching per-file misses would grow without bound
     return None
 
 
 def get_branch(repo_root: str) -> str:
-    """get the current branch name for a repo. returns HEAD hash if detached."""
+    """get the current branch name for a repo, cached until the repo's .git changes.
+
+    the cache is invalidated by invalidate_branch_cache() when a write inside
+    .git/ is observed (branch switch, checkout), so a hit is always current.
+    returns HEAD short hash if detached, "unknown" if git fails with no cache.
+    """
+    cached = _branch_cache.get(repo_root)
+    if cached is not None:
+        return cached
+
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -70,43 +80,13 @@ def get_branch(repo_root: str) -> str:
         )
         short_hash = result.stdout.strip()
         if short_hash:
-            _branch_cache[repo_root] = f"detached:{short_hash}"
-            return f"detached:{short_hash}"
+            detached = f"detached:{short_hash}"
+            _branch_cache[repo_root] = detached
+            return detached
     except (subprocess.TimeoutExpired, OSError) as e:
         logger.debug("failed to get branch for %s: %s", repo_root, e)
 
-    return _branch_cache.get(repo_root, "unknown")
-
-
-def get_repo_info(file_path: str) -> dict[str, str] | None:
-    """resolve repo name and branch for a changed file."""
-    repo_root = get_repo_root(file_path)
-    if repo_root is None:
-        return None
-
-    repo_name = os.path.basename(repo_root)
-    branch = get_branch(repo_root)
-
-    return {
-        "repo": repo_name,
-        "branch": branch,
-    }
-
-
-def has_dirty_worktree(repo_root: str) -> bool:
-    """check if a repo has uncommitted changes (staged or unstaged)."""
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return bool(result.stdout.strip())
-    except (subprocess.TimeoutExpired, OSError) as e:
-        logger.debug("failed to check git status for %s: %s", repo_root, e)
-        return False
+    return "unknown"
 
 
 def invalidate_branch_cache(repo_root: str) -> None:

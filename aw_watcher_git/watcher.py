@@ -15,12 +15,12 @@ from aw_core.models import Event
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from .attribution import AttributionEngine
 from .config import load_config, parse_args
 from .git_utils import (
     find_git_repos,
     get_branch,
-    get_repo_info,
-    has_dirty_worktree,
+    get_repo_root,
     invalidate_branch_cache,
 )
 
@@ -55,14 +55,14 @@ def _mic_in_use() -> bool:
 
 
 class FileChangeHandler(FileSystemEventHandler):
-    """handles filesystem events and buffers activity per repo."""
+    """handles filesystem events and buffers active repo names."""
 
     def __init__(self, ignore_dirs: list[str], ignore_extensions: list[str]) -> None:
         super().__init__()
         self._ignore_dirs = set(ignore_dirs)
         self._ignore_extensions = set(ignore_extensions)
         self._lock = threading.Lock()
-        self._buffer: dict[str, dict[str, str]] = {}
+        self._buffer: set[str] = set()
 
     def _should_ignore(self, path: str) -> bool:
         """check if a path should be ignored based on directory or extension."""
@@ -92,13 +92,12 @@ class FileChangeHandler(FileSystemEventHandler):
         if self._should_ignore(src_path):
             return
 
-        info = get_repo_info(src_path)
-        if info is None:
+        repo_root = get_repo_root(src_path)
+        if repo_root is None:
             return
 
         with self._lock:
-            repo_key = info["repo"]
-            self._buffer[repo_key] = info
+            self._buffer.add(os.path.basename(repo_root))
 
     def on_modified(self, event: FileSystemEvent) -> None:
         """called when a file is modified."""
@@ -125,16 +124,16 @@ class FileChangeHandler(FileSystemEventHandler):
         if not event.is_directory:
             self._handle_change(event.src_path)
 
-    def drain_buffer(self) -> list[dict[str, str]]:
-        """return all buffered activity and clear the buffer."""
+    def drain_buffer(self) -> set[str]:
+        """return all repo names with buffered activity and clear the buffer."""
         with self._lock:
-            events = list(self._buffer.values())
+            repos = set(self._buffer)
             self._buffer.clear()
-            return events
+            return repos
 
 
 class GitActivityWatcher:
-    """main watcher class - sets up observer and heartbeat loop."""
+    """main watcher class - sets up observer, signal sources, and the heartbeat loop."""
 
     def __init__(
         self,
@@ -149,9 +148,12 @@ class GitActivityWatcher:
 
         self._poll_time = poll_time or self._config["poll_time"]
         self._pulsetime = self._config["pulsetime"]
+        self._repo_map: dict[str, str] = dict(self._config.get("repo_map", {}))
 
         self._running = False
         self._observer: Observer | None = None
+        self._handler: FileChangeHandler | None = None
+        self._repo_paths: dict[str, str] = {}
 
         # setup aw-client
         from aw_client import ActivityWatchClient
@@ -166,6 +168,45 @@ class GitActivityWatcher:
 
         hostname = socket.gethostname()
         self._bucket_id = f"{WATCHER_NAME}_{hostname}"
+
+    def _remap(self, repo: str | None) -> str | None:
+        """apply repo_map so satellite checkouts bill to their target repo."""
+        if repo is None:
+            return None
+        return self._repo_map.get(repo, repo)
+
+    def _add_repo(self, repo_path: str) -> str | None:
+        """schedule a repo for watching; returns its name, or None on failure/collision."""
+        repo_name = os.path.basename(repo_path)
+        existing = self._repo_paths.get(repo_name)
+        if existing is not None:
+            if existing != repo_path:
+                logger.warning(
+                    "repo name collision: %s already watched at %s, skipping %s",
+                    repo_name,
+                    existing,
+                    repo_path,
+                )
+            return None
+        try:
+            self._observer.schedule(self._handler, repo_path, recursive=True)
+        except OSError as e:
+            logger.warning("failed to watch %s: %s", repo_path, e)
+            return None
+        self._repo_paths[repo_name] = repo_path
+        logger.info("watching: %s", repo_path)
+        return repo_name
+
+    def _discover_repos(self) -> list[str]:
+        """scan configured directories and watch any repos not yet scheduled."""
+        added: list[str] = []
+        for directory in self._config["directories"]:
+            expanded = os.path.expanduser(directory)
+            for repo_path in find_git_repos(expanded):
+                repo_name = self._add_repo(repo_path)
+                if repo_name:
+                    added.append(repo_name)
+        return added
 
     def run(self) -> None:
         """start the watcher - blocks until shutdown."""
@@ -195,88 +236,120 @@ class GitActivityWatcher:
         logger.info("bucket created: %s", self._bucket_id)
 
         # find repos and start watching
-        handler = FileChangeHandler(
+        self._handler = FileChangeHandler(
             ignore_dirs=self._config["ignore_dirs"],
             ignore_extensions=self._config.get("ignore_extensions", []),
         )
         self._observer = Observer()
+        self._discover_repos()
 
-        repo_paths: dict[str, str] = {}
-        for directory in self._config["directories"]:
-            expanded = os.path.expanduser(directory)
-            repos = find_git_repos(expanded)
-            for repo_path in repos:
-                try:
-                    self._observer.schedule(handler, repo_path, recursive=True)
-                    repo_name = os.path.basename(repo_path)
-                    repo_paths[repo_name] = repo_path
-                    logger.info("watching: %s", repo_path)
-                except OSError as e:
-                    logger.warning("failed to watch %s: %s", repo_path, e)
-
-        if not repo_paths:
+        if not self._repo_paths:
             logger.warning("no git repos found to watch")
 
         self._observer.start()
         logger.info(
-            "watching %d repos, polling every %.0fs", len(repo_paths), self._poll_time
+            "watching %d repos, polling every %.0fs",
+            len(self._repo_paths),
+            self._poll_time,
         )
 
-        # initialize window cross-referencer
+        personal_repos = set(self._config.get("personal_repos", []))
+
+        # window cross-referencer (title parsing + idle detection)
         crossref = None
         if self._config.get("window_crossref", True):
             try:
                 from .window_crossref import WindowCrossReferencer
 
-                hostname = socket.gethostname()
                 crossref = WindowCrossReferencer(
                     client=self._client,
-                    hostname=hostname,
-                    watched_repos=list(repo_paths.keys()),
+                    hostname=socket.gethostname(),
+                    watched_repos=list(self._repo_paths.keys()),
                     repo_aliases=self._config.get("repo_aliases", {}),
-                    repo_paths=repo_paths,
-                    personal_repos=self._config.get("personal_repos", []),
+                    idle_stale_seconds=self._config.get("idle_stale_seconds", 60.0),
                 )
                 logger.info("window cross-referencing enabled")
             except Exception:
                 logger.warning("failed to initialize window cross-ref", exc_info=True)
 
-        # heartbeat loop
-        last_git_status_time = 0.0
-        recent_active_repos: dict[str, float] = {}
-        git_status_interval = self._config.get("git_status_interval", 60.0)
+        # cpu-activity monitor for coding-agent processes (claude, codex, ...)
+        agents = None
+        agent_names = self._config.get("agent_process_names", [])
+        if agent_names and sys.platform == "linux":
+            from .proc_agents import ProcAgentMonitor
+
+            agents = ProcAgentMonitor(
+                process_names=agent_names,
+                repo_path_to_name={
+                    os.path.realpath(path): name
+                    for name, path in self._repo_paths.items()
+                    if name not in personal_repos
+                },
+            )
+            logger.info("agent cpu detection enabled: %s", ", ".join(agent_names))
+
+        engine = AttributionEngine(
+            fs_signal_window=self._config.get("fs_signal_window", 60.0),
+            tail_seconds=self._config.get("tail_seconds", 300.0),
+        )
+
         afk_aware = self._config.get("afk_aware", True)
         suppress_on_call = self._config.get("suppress_on_call", True)
+        rescan_interval = self._config.get("rescan_interval", 300.0)
+        last_rescan = time.time()
         mic_suppressed_prev = False
 
         try:
             while self._running:
                 now_ts = time.time()
                 now = datetime.now(timezone.utc)
-                fs_repo_names: set[str] = set()
 
-                # suppression signals: real file saves (phase 1) always count,
-                # but inferred activity (phases 2 & 3) is paused while on a call
-                # or while the afk watcher reports the user is away.
+                # suppression signals: real file saves always count, but
+                # inferred attribution (window, agents, tail) is paused while
+                # on a call or while input has stopped.
                 mic_active = suppress_on_call and _mic_in_use()
                 if mic_active and not mic_suppressed_prev:
-                    logger.info("microphone in use (call detected) — pausing inferred heartbeats")
+                    logger.info("microphone in use (call detected) — pausing inferred attribution")
                 elif not mic_active and mic_suppressed_prev:
-                    logger.info("microphone released — resuming inferred heartbeats")
+                    logger.info("microphone released — resuming inferred attribution")
                 mic_suppressed_prev = mic_active
 
-                afk = False
-                if afk_aware and crossref is not None:
-                    afk = crossref.is_afk()
+                idle = afk_aware and crossref is not None and crossref.is_idle()
+                suppress_inferred = mic_active or idle
 
-                suppress_inferred = mic_active or afk
+                fs_repos = {self._remap(r) for r in self._handler.drain_buffer()}
 
-                # phase 1: drain filesystem events (existing behavior)
-                events = handler.drain_buffer()
-                for event_data in events:
-                    fs_repo_names.add(event_data["repo"])
-                    recent_active_repos[event_data["repo"]] = now_ts
-                    event = Event(timestamp=now, data=event_data)
+                window_repo = None
+                agent_repos: set[str] = set()
+                if not suppress_inferred:
+                    if crossref is not None:
+                        try:
+                            window_repo = self._remap(crossref.get_window_repo())
+                        except Exception:
+                            logger.debug("window cross-ref failed", exc_info=True)
+                    if agents is not None:
+                        try:
+                            agent_repos = {
+                                self._remap(r) for r in agents.sample(now_ts)
+                            }
+                        except Exception:
+                            logger.debug("agent cpu sampling failed", exc_info=True)
+
+                attribution = engine.decide(
+                    now=now_ts,
+                    fs_repos=fs_repos,
+                    window_repo=window_repo,
+                    agent_repos=agent_repos,
+                    suppress_inferred=suppress_inferred,
+                )
+
+                if attribution is not None:
+                    repo_path = self._repo_paths.get(attribution.repo)
+                    branch = get_branch(repo_path) if repo_path else "unknown"
+                    event = Event(
+                        timestamp=now,
+                        data={"repo": attribution.repo, "branch": branch},
+                    )
                     self._client.heartbeat(
                         self._bucket_id,
                         event,
@@ -284,81 +357,20 @@ class GitActivityWatcher:
                         queued=False,
                     )
                     logger.info(
-                        "heartbeat [fs]: %s @ %s",
-                        event_data["repo"],
-                        event_data["branch"],
+                        "heartbeat [%s]: %s @ %s",
+                        attribution.reason,
+                        attribution.repo,
+                        branch,
                     )
 
-                # phase 2: window cross-referencing
-                if crossref is not None and not suppress_inferred:
-                    try:
-                        # afk already handled above; avoid a duplicate bucket query.
-                        # pass repos with recent *real* file activity so the /proc
-                        # claude-code fallback only attributes to a repo you've
-                        # actually been editing — a background claude session in a
-                        # watched repo no longer gets billed on any focused ✳ tab.
-                        recent_fs_repos = {
-                            r
-                            for r, t in recent_active_repos.items()
-                            if now_ts - t <= 300
-                        }
-                        window_repo = crossref.get_active_repo(
-                            afk_aware=False, recent_repos=recent_fs_repos
-                        )
-                        if window_repo and window_repo not in fs_repo_names:
-                            repo_path = repo_paths.get(window_repo)
-                            if repo_path:
-                                branch = get_branch(repo_path)
-                                event_data = {"repo": window_repo, "branch": branch}
-                                # do NOT refresh recent_active_repos here: inferred
-                                # window activity must not sustain phase 3 git-status
-                                # polling, or phases 2 & 3 keep each other alive with
-                                # no real edits (unbounded inferred over-count).
-                                event = Event(timestamp=now, data=event_data)
-                                self._client.heartbeat(
-                                    self._bucket_id,
-                                    event,
-                                    pulsetime=self._pulsetime,
-                                    queued=False,
-                                )
-                                logger.info(
-                                    "heartbeat [window]: %s @ %s",
-                                    window_repo,
-                                    branch,
-                                )
-                    except Exception:
-                        logger.debug("window cross-ref failed", exc_info=True)
-
-                # phase 3: git-status polling (less frequent)
-                if not suppress_inferred and now_ts - last_git_status_time >= git_status_interval:
-                    last_git_status_time = now_ts
-                    for repo_name, last_active in list(recent_active_repos.items()):
-                        if now_ts - last_active > 300:
-                            continue
-                        if repo_name in fs_repo_names:
-                            continue
-                        repo_path = repo_paths.get(repo_name)
-                        if repo_path and has_dirty_worktree(repo_path):
-                            branch = get_branch(repo_path)
-                            event_data = {"repo": repo_name, "branch": branch}
-                            event = Event(timestamp=now, data=event_data)
-                            self._client.heartbeat(
-                                self._bucket_id,
-                                event,
-                                pulsetime=self._pulsetime,
-                                queued=False,
-                            )
-                            logger.info(
-                                "heartbeat [git-status]: %s @ %s",
-                                repo_name,
-                                branch,
-                            )
-
-                # clean up stale entries
-                cutoff = now_ts - 600
-                recent_active_repos = {
-                    k: v for k, v in recent_active_repos.items() if v > cutoff
-                }
+                # pick up repos cloned since startup
+                if now_ts - last_rescan >= rescan_interval:
+                    last_rescan = now_ts
+                    for repo_name in self._discover_repos():
+                        if crossref is not None:
+                            crossref.add_repo(repo_name)
+                        if agents is not None and repo_name not in personal_repos:
+                            agents.add_repo(self._repo_paths[repo_name], repo_name)
 
                 time.sleep(self._poll_time)
         except Exception:
