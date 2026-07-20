@@ -415,6 +415,42 @@
       return { isAfk: false, duration: 0 };
     }
 
+    /* merge afk "away" spans into non-overlapping [start,end] ms intervals.
+       the afk bucket can contain duplicate/overlapping events, so a naive
+       sum double-counts; merging first keeps the subtraction honest. */
+    function mergedAfkIntervals(afkEvents) {
+      const spans = (afkEvents || [])
+        .filter(e => (e.data || {}).status === 'afk')
+        .map(e => {
+          const s = new Date(e.timestamp).getTime();
+          return [s, s + (e.duration || 0) * 1000];
+        })
+        .filter(([s, e]) => e > s)
+        .sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      for (const [s, e] of spans) {
+        const last = merged[merged.length - 1];
+        if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+        else merged.push([s, e]);
+      }
+      return merged;
+    }
+
+    /* seconds of a single event that fall inside afk (away) spans */
+    function eventAfkOverlapSeconds(ev, afkIntervals) {
+      if (!afkIntervals.length) return 0;
+      const s = new Date(ev.timestamp).getTime();
+      const e = s + (ev.duration || 0) * 1000;
+      if (e <= s) return 0;
+      let overlapMs = 0;
+      for (const [as, ae] of afkIntervals) {
+        if (ae <= s) continue;
+        if (as >= e) break;  // intervals sorted: no later one can overlap
+        overlapMs += Math.min(e, ae) - Math.max(s, as);
+      }
+      return overlapMs / 1000;
+    }
+
     /* ------------------------------------------------------------------ */
     /*  rendering helpers                                                   */
     /* ------------------------------------------------------------------ */
@@ -477,19 +513,26 @@
 
       const winIdx = buildWindowIndex(winEvents);
       const afkIdx = buildAfkIndex(afkEvents);
+      const afkIntervals = mergedAfkIntervals(afkEvents);
 
-      /* --- by project (git bucket aggregation) --- */
+      /* --- by project (git bucket aggregation) ---
+         the git watcher logs inferred heartbeats that can bleed into away
+         time; subtract each event's afk overlap so these totals reflect
+         actual active work, matching the git watcher viz (index.html). */
       const repoTotals = {};
       const branchTotals = {};
       let gitTotal = 0;
+      let gitActive = 0;
       for (const ev of gitEvents) {
         const repo = ev.data?.repo || 'unknown';
         const branch = ev.data?.branch || 'unknown';
         const dur = ev.duration || 0;
+        const active = Math.max(dur - eventAfkOverlapSeconds(ev, afkIntervals), 0);
         gitTotal += dur;
-        repoTotals[repo] = (repoTotals[repo] || 0) + dur;
+        gitActive += active;
+        repoTotals[repo] = (repoTotals[repo] || 0) + active;
         const key = `${repo}\u0000${branch}`;
-        branchTotals[key] = (branchTotals[key] || 0) + dur;
+        branchTotals[key] = (branchTotals[key] || 0) + active;
       }
 
       const projectRows = [];
@@ -505,6 +548,11 @@
         }
       }
       renderTree(document.getElementById('projectTree'), projectRows);
+      const gitAway = gitTotal - gitActive;
+      if (gitAway > 30) {
+        document.getElementById('projectTree').insertAdjacentHTML('beforeend',
+          `<div class="legend">active time &middot; ${fmtDur(gitAway)} away excluded of ${fmtDur(gitTotal)} logged</div>`);
+      }
 
       /* --- build git event timeline for cross-referencing ambiguous events --- */
       const gitIdx = gitEvents
@@ -735,8 +783,8 @@
           <div class="stat-value accent">${fmtDur(workTotal)}</div>
         </div>
         <div class="stat">
-          <div class="stat-label">git tracked</div>
-          <div class="stat-value blue">${fmtDur(gitTotal)}</div>
+          <div class="stat-label">git tracked (active)</div>
+          <div class="stat-value blue">${fmtDur(gitActive)}</div>
         </div>
         <div class="stat">
           <div class="stat-label">recovered (short afk)</div>
