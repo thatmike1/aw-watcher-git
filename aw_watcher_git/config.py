@@ -42,6 +42,9 @@ DEFAULT_CONFIG = {
     # checkout that is really part of work on the target repo:
     # [aw-watcher-git.repo_map] \n OSX-KVM = "pracino"
     "repo_map": {},
+    # collapse linked worktrees onto their main checkout, so several worktrees of
+    # one project read as one repo (branch still distinguishes them)
+    "group_worktrees": True,
     # process names counted as coding agents for /proc cpu-activity detection
     "agent_process_names": ["claude", "codex", "opencode"],
     # not-afk event end older than this (seconds) counts as idle (input stopped)

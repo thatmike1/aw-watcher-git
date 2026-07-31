@@ -18,6 +18,7 @@ ActivityWatch watcher that tracks git repo activity via filesystem monitoring (w
 - event data is exactly `{repo, branch}` — adding fields (e.g. signal source) breaks AW merge chains
 - inferred signals (window, agent, tail) suppressed while idle (afk-event staleness, not just afk status) or on a call (mic capture)
 - real fs events count even while idle (agent working autonomously = trackable work)
+- linked worktrees collapse onto their main checkout via `git rev-parse --git-common-dir`; the heartbeat's branch still comes from the worktree that produced the signal, tracked in `_last_source` so tail ticks don't flip it
 - `repo_map` re-attributes satellite checkouts (VM images, build worktrees) to their main repo
 - branch cache is read-through, invalidated when `.git/` changes (branch switch)
 - `find_git_repos()` scans one level deep; rescanned every `rescan_interval` for new clones

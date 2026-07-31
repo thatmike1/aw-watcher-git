@@ -27,6 +27,57 @@ def find_git_repos(directory: str) -> list[str]:
     return repos
 
 
+def get_worktree_main(repo_path: str) -> str | None:
+    """return the main checkout's path if repo_path is a linked worktree, else None.
+
+    every worktree of a repo shares one .git directory, and
+    `git rev-parse --git-common-dir` points at it, so its parent is the main
+    checkout. this lets sibling worktrees of one project collapse to a single
+    repo identity without any per-project config.
+
+    returns None for main checkouts, submodules (their common dir lives under
+    .git/modules), bare repos, and anything git can't resolve.
+    """
+    # linked worktrees and submodules use a .git *file*; a main checkout has a
+    # directory, so this skips the subprocess for the common case
+    if not (Path(repo_path) / ".git").is_file():
+        return None
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.debug("failed to resolve common dir for %s: %s", repo_path, e)
+        return None
+
+    common = result.stdout.strip()
+    if not common:
+        return None
+
+    common_path = Path(common)
+    if not common_path.is_absolute():
+        common_path = Path(repo_path) / common_path
+    try:
+        common_path = common_path.resolve()
+    except OSError:
+        return None
+
+    # a submodule's common dir is <super>/.git/modules/<name>, a bare repo's is
+    # the repo itself - neither has a main checkout to attribute to
+    if common_path.name != ".git":
+        return None
+
+    main = common_path.parent
+    if main == Path(repo_path).resolve():
+        return None
+    return str(main)
+
+
 def get_repo_root(file_path: str) -> str | None:
     """given a file path, find the git repo root it belongs to. roots are cached."""
     path = Path(file_path).resolve()

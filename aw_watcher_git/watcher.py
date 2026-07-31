@@ -21,6 +21,7 @@ from .git_utils import (
     find_git_repos,
     get_branch,
     get_repo_root,
+    get_worktree_main,
     invalidate_branch_cache,
 )
 
@@ -149,11 +150,17 @@ class GitActivityWatcher:
         self._poll_time = poll_time or self._config["poll_time"]
         self._pulsetime = self._config["pulsetime"]
         self._repo_map: dict[str, str] = dict(self._config.get("repo_map", {}))
+        self._group_worktrees: bool = self._config.get("group_worktrees", True)
 
         self._running = False
         self._observer: Observer | None = None
         self._handler: FileChangeHandler | None = None
         self._repo_paths: dict[str, str] = {}
+        # linked worktree name -> main checkout name, filled in as repos are watched
+        self._worktree_map: dict[str, str] = {}
+        # canonical repo -> the worktree that last produced a signal for it, so a
+        # tail tick keeps reporting the branch the work is actually happening on
+        self._last_source: dict[str, str] = {}
 
         # setup aw-client
         from aw_client import ActivityWatchClient
@@ -169,11 +176,24 @@ class GitActivityWatcher:
         hostname = socket.gethostname()
         self._bucket_id = f"{WATCHER_NAME}_{hostname}"
 
-    def _remap(self, repo: str | None) -> str | None:
-        """apply repo_map so satellite checkouts bill to their target repo."""
+    def _remap(self, repo: str | None, sources: dict[str, str] | None = None) -> str | None:
+        """resolve a signal's repo name to the identity heartbeats are billed to.
+
+        configured repo_map entries apply first (explicit intent wins), then
+        sibling worktrees collapse onto their main checkout.
+
+        worktree collapses record the originating worktree in `sources` so the
+        heartbeat can still report that worktree's branch - repo_map remaps
+        deliberately do not, since a satellite checkout's branch is meaningless
+        for the repo it bills to.
+        """
         if repo is None:
             return None
-        return self._repo_map.get(repo, repo)
+        mapped = self._repo_map.get(repo, repo)
+        canonical = self._worktree_map.get(mapped, mapped)
+        if sources is not None and canonical != mapped:
+            sources.setdefault(canonical, mapped)
+        return canonical
 
     def _add_repo(self, repo_path: str) -> str | None:
         """schedule a repo for watching; returns its name, or None on failure/collision."""
@@ -194,7 +214,20 @@ class GitActivityWatcher:
             logger.warning("failed to watch %s: %s", repo_path, e)
             return None
         self._repo_paths[repo_name] = repo_path
-        logger.info("watching: %s", repo_path)
+
+        main_name = None
+        if self._group_worktrees:
+            main_path = get_worktree_main(repo_path)
+            if main_path:
+                candidate = os.path.basename(main_path)
+                if candidate != repo_name:
+                    self._worktree_map[repo_name] = candidate
+                    main_name = candidate
+
+        if main_name:
+            logger.info("watching: %s (worktree of %s)", repo_path, main_name)
+        else:
+            logger.info("watching: %s", repo_path)
         return repo_name
 
     def _discover_repos(self) -> list[str]:
@@ -317,20 +350,29 @@ class GitActivityWatcher:
                 idle = afk_aware and crossref is not None and crossref.is_idle()
                 suppress_inferred = mic_active or idle
 
-                fs_repos = {self._remap(r) for r in self._handler.drain_buffer()}
+                # which worktree backed each canonical repo this tick; filled in
+                # signal-strength order (fs, then window, then agent) so the
+                # strongest signal decides the branch
+                sources: dict[str, str] = {}
+
+                fs_repos = {
+                    self._remap(r, sources)
+                    for r in sorted(self._handler.drain_buffer())
+                }
 
                 window_repo = None
                 agent_repos: set[str] = set()
                 if not suppress_inferred:
                     if crossref is not None:
                         try:
-                            window_repo = self._remap(crossref.get_window_repo())
+                            window_repo = self._remap(crossref.get_window_repo(), sources)
                         except Exception:
                             logger.debug("window cross-ref failed", exc_info=True)
                     if agents is not None:
                         try:
                             agent_repos = {
-                                self._remap(r) for r in agents.sample(now_ts)
+                                self._remap(r, sources)
+                                for r in sorted(agents.sample(now_ts))
                             }
                         except Exception:
                             logger.debug("agent cpu sampling failed", exc_info=True)
@@ -344,7 +386,17 @@ class GitActivityWatcher:
                 )
 
                 if attribution is not None:
-                    repo_path = self._repo_paths.get(attribution.repo)
+                    # read the branch from the worktree that actually produced the
+                    # signal; on a tick with no fresh signal (tail, lingering fs)
+                    # reuse the last one, so the branch doesn't flip mid-event and
+                    # break the merge chain
+                    source = sources.get(attribution.repo)
+                    if source is not None:
+                        self._last_source[attribution.repo] = source
+                    else:
+                        source = self._last_source.get(attribution.repo)
+
+                    repo_path = self._repo_paths.get(source or attribution.repo)
                     branch = get_branch(repo_path) if repo_path else "unknown"
                     event = Event(
                         timestamp=now,

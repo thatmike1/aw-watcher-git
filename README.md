@@ -17,6 +17,8 @@ Every `poll_time` seconds (default 10s) the watcher gathers signals and asks a p
 
 **Tail.** When all signals go quiet (thinking, reading docs), the current repo keeps earning time for up to `tail_seconds` (default 300s) after its last direct signal, then attribution stops. The tail can't sustain itself.
 
+**Worktrees.** Linked worktrees of one project (`git worktree add`) are separate directories with their own `.git`, so left alone they'd read as separate repos and shred a single project's evening into fragments as you switch between them. They're detected via `git rev-parse --git-common-dir` and collapsed onto their main checkout automatically — no config per project. The heartbeat still reports the branch of the worktree that actually produced the signal, so `repo` says *which project* and `branch` says *which worktree*. Disable with `group_worktrees = false`.
+
 **Remapping.** `repo_map` re-attributes one repo's activity to another — e.g. a VM image checkout or build-output worktree whose writes are really work on the main project. Mapped this way, satellite writes merge into the main repo's blocks instead of fragmenting them.
 
 No signal = no heartbeat = no false activity. Branch names are cached per repo (invalidated on `.git/` writes); detached HEAD reports as `detached:<shorthash>`. Configured directories are rescanned every `rescan_interval` seconds so freshly cloned repos get picked up without a restart.
@@ -72,6 +74,7 @@ idle_stale_seconds = 60.0
 tail_seconds = 300.0
 fs_signal_window = 60.0
 rescan_interval = 300.0
+group_worktrees = true
 
 [aw-watcher-git.repo_map]
 # "OSX-KVM" = "pracino"
@@ -92,6 +95,7 @@ rescan_interval = 300.0
 - **tail_seconds** — how long the current repo keeps earning time after its last direct signal
 - **fs_signal_window** — how long a file save keeps its repo eligible for attribution
 - **rescan_interval** — how often to rescan `directories` for newly cloned repos
+- **group_worktrees** — collapse linked worktrees onto their main checkout (default on)
 - **repo_map** — attribute one repo's activity to another (satellite VM/build checkouts)
 
 ## Event format
