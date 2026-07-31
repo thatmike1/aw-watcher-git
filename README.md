@@ -13,6 +13,8 @@ Every `poll_time` seconds (default 10s) the watcher gathers signals and asks a p
 - **CPU-active agent processes** (score 1). Processes named in `agent_process_names` (claude, codex, opencode by default) are sampled via `/proc`; a session that burned CPU since the last tick attributes to the repo its working directory sits in. This is title-independent, so it tracks reading/planning agent sessions and survives terminal layout changes. Repos in `personal_repos` are excluded.
 - **Stickiness** (+0.5). The currently attributed repo wins ties, so two concurrently active repos never flip-flop; a switch requires a genuinely stronger signal (usually window focus).
 
+**Commit window.** Scores are accumulated rather than acted on tick by tick. The repo committed when a window opens is held for `commit_seconds` (default 60s), and the window's accumulated leader wins the next one — so two repos with live signals produce one block per minute instead of alternating on every poll, which is what shreds an AW bucket into zero-duration events (a merge chain breaks the moment `{repo, branch}` changes). The cost is deliberate: a detour shorter than the window is absorbed into whatever dominated it. A held repo that goes quiet for half a window is released early — that's a departure, not flapping. Set `commit_seconds = 0` to decide every tick.
+
 **Suppression.** While the user is idle or on a call (mic capture detected), only real file saves from that exact tick count — inferred signals pause. Idle is detected from the `aw-watcher-afk` bucket by *staleness*: the not-afk event's end stops advancing the moment input stops, which catches breaks in ~`idle_stale_seconds` (default 60s) instead of waiting for the ~180s afk timeout.
 
 **Tail.** When all signals go quiet (thinking, reading docs), the current repo keeps earning time for up to `tail_seconds` (default 300s) after its last direct signal, then attribution stops. The tail can't sustain itself.
@@ -73,6 +75,7 @@ agent_process_names = ["claude", "codex", "opencode"]
 idle_stale_seconds = 60.0
 tail_seconds = 300.0
 fs_signal_window = 60.0
+commit_seconds = 60.0
 rescan_interval = 300.0
 group_worktrees = true
 
@@ -94,6 +97,7 @@ group_worktrees = true
 - **idle_stale_seconds** — a not-afk event whose end lags now by more than this counts as idle
 - **tail_seconds** — how long the current repo keeps earning time after its last direct signal
 - **fs_signal_window** — how long a file save keeps its repo eligible for attribution
+- **commit_seconds** — how long the attributed repo is held before re-deciding (0 = every tick)
 - **rescan_interval** — how often to rescan `directories` for newly cloned repos
 - **group_worktrees** — collapse linked worktrees onto their main checkout (default on)
 - **repo_map** — attribute one repo's activity to another (satellite VM/build checkouts)

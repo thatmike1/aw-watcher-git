@@ -53,6 +53,9 @@ DEFAULT_CONFIG = {
     "tail_seconds": 300.0,
     # fs activity keeps a repo eligible for attribution this long (seconds)
     "fs_signal_window": 60.0,
+    # hold the attributed repo this long before re-deciding, so competing signals
+    # produce one block per window instead of flip-flopping every tick; 0 disables
+    "commit_seconds": 60.0,
     # how often to rescan configured directories for newly cloned repos
     "rescan_interval": 300.0,
 }

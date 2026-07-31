@@ -55,7 +55,15 @@ def test_tie_without_window_sticks_to_current():
 
 
 def test_window_focus_switches_attribution():
+    """focus moving to a repo that stays busy wins, once a commit window closes."""
     engine = AttributionEngine()
+    run_ticks(engine, [({"alpha"}, "alpha", set(), False)] * 3)
+    results = run_ticks(engine, [({"alpha", "beta"}, "beta", set(), False)] * 15)
+    assert results[-1].repo == "beta"
+
+
+def test_window_focus_switches_immediately_without_commit_window():
+    engine = AttributionEngine(commit_seconds=0.0)
     run_ticks(engine, [({"alpha"}, "alpha", set(), False)] * 3)
     results = run_ticks(engine, [({"alpha", "beta"}, "beta", set(), False)] * 3)
     assert all(r.repo == "beta" for r in results)
@@ -131,3 +139,48 @@ def test_stronger_combined_signal_beats_lone_fs():
     ticks = [({"agent-repo", "user-repo"}, "user-repo", set(), False)] * 5
     results = run_ticks(engine, ticks)
     assert all(r.repo == "user-repo" for r in results)
+
+
+def test_commit_window_absorbs_flapping():
+    """focus bouncing between two repos every tick must not shred attribution."""
+    engine = AttributionEngine(commit_seconds=60.0)
+    ticks = [
+        ({"alpha", "beta"}, "alpha" if i % 2 == 0 else "beta", set(), False)
+        for i in range(12)
+    ]
+    results = run_ticks(engine, ticks)
+    repos = [r.repo for r in results]
+    switches = sum(1 for a, b in zip(repos, repos[1:]) if a != b)
+    # 120s of ticks, so at most one boundary can move it - per-tick deciding
+    # would produce a switch on nearly every tick instead
+    assert switches <= 1
+
+
+def test_commit_window_releases_a_repo_that_goes_silent():
+    """a departure (old repo gone for good) is released without waiting for the boundary."""
+    engine = AttributionEngine(commit_seconds=60.0, fs_signal_window=0.0)
+    run_ticks(engine, [({"alpha"}, "alpha", set(), False)])
+    results = run_ticks(engine, [({"beta"}, "beta", set(), False)] * 6)
+    repos = [r.repo for r in results]
+    # held while alpha might still come back, released well before t=1060
+    assert repos[0] == "alpha"
+    assert repos[-1] == "beta"
+    assert repos.index("beta") <= 4
+
+
+def test_hold_does_not_extend_the_tail():
+    """time billed by a hold must not push out the silent repo's tail budget."""
+    engine = AttributionEngine(commit_seconds=60.0, fs_signal_window=0.0, tail_seconds=30.0)
+    # alpha wins the window, then beta is the only thing signalling for 3 ticks
+    ticks = [({"alpha"}, "alpha", set(), False)] * 2 + [({"beta"}, None, set(), False)] * 3
+    run_ticks(engine, ticks)
+    # alpha's tail is measured from its own last real signal, not from the holds
+    assert engine._last_direct["alpha"] == 1010.0
+
+
+def test_commit_window_bypassed_while_suppressed():
+    """while idle, only the repo actually being written to earns the tick."""
+    engine = AttributionEngine(commit_seconds=60.0)
+    run_ticks(engine, [({"alpha"}, "alpha", set(), False)] * 2)
+    results = run_ticks(engine, [({"beta"}, None, set(), True)] * 2)
+    assert [r.repo for r in results] == ["beta", "beta"]

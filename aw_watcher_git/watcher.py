@@ -324,6 +324,7 @@ class GitActivityWatcher:
         engine = AttributionEngine(
             fs_signal_window=self._config.get("fs_signal_window", 60.0),
             tail_seconds=self._config.get("tail_seconds", 300.0),
+            commit_seconds=self._config.get("commit_seconds", 60.0),
         )
 
         afk_aware = self._config.get("afk_aware", True)

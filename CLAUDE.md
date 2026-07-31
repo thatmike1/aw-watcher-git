@@ -14,6 +14,7 @@ ActivityWatch watcher that tracks git repo activity via filesystem monitoring (w
 
 ## Key patterns
 
+- attribution is committed for `commit_seconds` (default 60s) at a time, not per tick — competing signals would otherwise flip every poll and shred the bucket; holds don't refresh the tail, and a repo quiet for half a window is released early
 - exactly ONE heartbeat per tick — multiple repos interleaving in one AW bucket break heartbeat merging and produce zero-duration events; never emit for more than one repo per tick
 - event data is exactly `{repo, branch}` — adding fields (e.g. signal source) breaks AW merge chains
 - inferred signals (window, agent, tail) suppressed while idle (afk-event staleness, not just afk status) or on a call (mic capture)
